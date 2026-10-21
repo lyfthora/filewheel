@@ -25,7 +25,7 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    internal struct MousehookData
+    internal struct MouseHookData
     {
         public Point Point;
         public int MouseData;

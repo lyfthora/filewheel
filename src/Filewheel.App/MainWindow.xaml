@@ -11,6 +11,6 @@
         ShowActivated="False"
         Topmost="True"
         ResizeMode="NoResize"
-        WindowStartupLocation="Manual"
+        WindowStartupLocation="Manual">
     <local:WheelView x:Name="Wheel" />
 </Window>

@@ -10,9 +10,10 @@ internal sealed class DragMonitor : IDisposable
     private readonly NativeMethods.LowLevelMouseProc _callback;
     private IntPtr _hook;
     private bool _buttonDown;
-    private bool _draggin;
+    private bool _dragging;
     private int _originX;
     private int _originY;
+    private bool _shiftArmed;
 
     internal DragMonitor()
     {
@@ -79,12 +80,13 @@ internal sealed class DragMonitor : IDisposable
     }
     private void HandleButtonDown(NativeMethods.Point point)
     {
-        if (_buttonDown || !IsShiftDown())
+        if (_buttonDown)
         {
             return;
         }
         _buttonDown = true;
-        _draggin = false;
+        _dragging = false;
+        _shiftArmed = false;
         _originX = point.X;
         _originY = point.Y;
     }
@@ -94,23 +96,33 @@ internal sealed class DragMonitor : IDisposable
         {
             return;
         }
-        if (_draggin)
+        if (!_dragging)
         {
-            if (!IsShiftDown())
+            var dx = point.X - _originX;
+            var dy = point.Y - _originY;
+            if ((dx * dx) + (dy * dy) < DragThresholdPixels * DragThresholdPixels)
             {
-                Cancel();
                 return;
             }
-            Moved?.Invoke(point.X, point.Y);
+            _dragging = true;
+        }
+        var shiftDown = IsShiftDown();
+        if (!_shiftArmed)
+        {
+            if (!shiftDown)
+            {
+                return;
+            }
+            _shiftArmed = true;
+            DragStarted?.Invoke(point.X, point.Y);
             return;
         }
-        var dx = point.X - _originX;
-        var dy = point.Y - _originY;
-        if ((dx * dx) + (dy * dy) >= DragThresholdPixels * DragThresholdPixels)
+        if (!shiftDown)
         {
-            _draggin = true;
-            DragStarted?.Invoke(_originX, _originY);
+            Cancel();
+            return;
         }
+        Moved?.Invoke(point.X, point.Y);
     }
     private void HandleButtonUp(NativeMethods.Point point)
     {
@@ -118,7 +130,14 @@ internal sealed class DragMonitor : IDisposable
         {
             return;
         }
-        _draggin = false;
+        var wasArmed = _shiftArmed;
+        _buttonDown = false;
+        _dragging = false;
+        _shiftArmed = false;
+        if (!wasArmed)
+        {
+            return;
+        }
         if (IsShiftDown())
         {
             Dropped?.Invoke(point.X, point.Y);
@@ -131,7 +150,8 @@ internal sealed class DragMonitor : IDisposable
     private void Cancel()
     {
         _buttonDown = false;
-        _draggin = false;
+        _dragging = false;
+        _shiftArmed = false;
         Cancelled?.Invoke();
     }
     private static bool IsShiftDown()
