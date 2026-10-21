@@ -484,3 +484,12 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# Windows shortcuts
+*.lnk
+
+# Vim temporary swap files
+*.swp
+
+# La carpeta src/Filewheel.App es un proyecto WPF, no un bundle de macOS
+!src/Filewheel.App/
