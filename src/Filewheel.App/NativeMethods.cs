@@ -10,6 +10,9 @@ internal static class NativeMethods
     internal const int WsExNoActivate = 0x08000000;
     internal const int WsExToolWindow = 0x00000080;
     internal const uint SwpNoActivate = 0x0010;
+    internal const uint AttachParentProcess = 0xFFFFFFFF;
+    internal const uint GmemMoveable = 0x0002;
+    internal const uint CfUnicodeText = 13;
     internal const int WhMouseLl = 14;
     internal const int WmLButtonDown = 0x0201;
     internal const int WmLButtonUp = 0x0202;
@@ -53,6 +56,26 @@ internal static class NativeMethods
     internal static extern int SetWindowLong(IntPtr hwn, int index, int value);
     [DllImport("user32.dll")]
     internal static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("kernel32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AttachConsole(uint processId);
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool OpenClipboard(IntPtr owner);
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool CloseClipboard();
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool EmptyClipboard();
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr SetClipboardData(uint format, IntPtr data);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr GlobalLock(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool GlobalUnlock(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr GlobalFree(IntPtr handle);
+
 
     [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW")]
     internal static extern IntPtr SetWindowsHookEx(
