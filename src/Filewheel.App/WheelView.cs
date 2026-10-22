@@ -21,6 +21,7 @@ public sealed class WheelView : FrameworkElement
 
     private IReadOnlyList<string> _labels = Array.Empty<string>();
     private int _hoverIndex = -1;
+    private string _centerText = string.Empty;
 
     public IReadOnlyList<string> Labels
     {
@@ -42,6 +43,15 @@ public sealed class WheelView : FrameworkElement
                 return;
             }
             _hoverIndex = value;
+            InvalidateVisual();
+        }
+    }
+    public string CenterText
+    {
+        get => _centerText;
+        set
+        {
+            _centerText = value ?? string.Empty;
             InvalidateVisual();
         }
     }
@@ -91,6 +101,24 @@ public sealed class WheelView : FrameworkElement
             var geometry = CreateSector(center, radius, innerRadius, start, end);
             var isHovered = index == _hoverIndex;
             drawingContext.DrawGeometry(isHovered ? HoverFill : BaseFill, EdgePen, geometry);
+            if (_centerText.Length > 0)
+            {
+                var status = new FormattedText(
+                _centerText,
+                CultureInfo.CurrentUICulture,
+                FlowDirection.LeftToRight,
+                LabelTypeface,
+                12.0,
+                LabelBrush,
+                pixelsPerDip)
+                {
+                    MaxTextWidth = innerRadius * 1.5,
+                    TextAlignment = TextAlignment.Center,
+                };
+                drawingContext.DrawText(
+                status,
+                new Point(center.X - (innerRadius * 0.75), center.Y - (status.Height / 2)));
+            }
 
             var text = new FormattedText(
             _labels[index],
