@@ -11,6 +11,9 @@
         ShowActivated="False"
         Topmost="True"
         ResizeMode="NoResize"
-        WindowStartupLocation="Manual">
+        WindowStartupLocation="Manual"
+         AllowDrop="True"
+        DragEnter="OnDragEnter"
+        Drop="OnDropFiles">
     <local:WheelView x:Name="Wheel" />
 </Window>

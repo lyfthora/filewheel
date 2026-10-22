@@ -73,9 +73,39 @@ public partial class MainWindow : Window
     public void HideWheel()
     {
         Wheel.HoverIndex = -1;
+        Wheel.CenterText = string.Empty;
         if (IsVisible)
         {
             Hide();
         }
+    }
+    // se soltaron archivbos sobre la rueda; (sector, rutas). sector = -1 si nno habia sector
+    public event Action<int, string[]>? FilesDropped;
+    public string LabelFor(int sector) => sector >= 0 && sector < Wheel.Labels.Count ? Wheel.Labels[sector] : string.Empty;
+    public void ShowStatus(string message)
+    {
+        Wheel.CenterText = message;
+    }
+    private void OnDragEnter(object sender, DragEventArgs e)
+    {
+        e.Effects = AcceptDrop(e.Data);
+        e.Handled = true;
+    }
+    private void OnDropFiles(object sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        NativeMethods.GetCursorPos(out var cursor);
+        HandleDrop(e.Data, cursor.X, cursor.Y);
+    }
+    // solo aceptmosa arrastres que traen rutas de archivos
+    private static DragDropEffects AcceptDrop(IDataObject data) => data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
+    //convierte el contenido sltado en (sector, rutas)y avisa
+    private void HandleDrop(IDataObject data, int screenX, int screenY)
+    {
+        if (data.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0)
+        {
+            return;
+        }
+        FilesDropped?.Invoke(ResolveSector(screenX, screenY), paths);
     }
 }
