@@ -41,6 +41,51 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetCursorPos(out Point point);
     [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool BringWindowToTop(IntPtr hwnd);
+
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetForegroundWindow(IntPtr hwnd);
+    internal static void ForceForeground(IntPtr hwnd)
+    {
+        if (GetForegroundWindow() == hwnd)
+        {
+            return;
+        }
+        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out _);
+        var currentThread = GetCurrentThreadId();
+        var attached = foregroundThread != 0
+            && foregroundThread != currentThread
+            && AttachThreadInput(currentThread, foregroundThread, true);
+
+        try
+        {
+            SetForegroundWindow(hwnd);
+            BringWindowToTop(hwnd);
+        }
+        finally
+        {
+            if (attached)
+            {
+                AttachThreadInput(currentThread, foregroundThread, false);
+            }
+        }
+    }
+
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool SetWindowPos(
     IntPtr hwnd,
@@ -75,7 +120,6 @@ internal static class NativeMethods
     internal static extern bool GlobalUnlock(IntPtr handle);
     [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern IntPtr GlobalFree(IntPtr handle);
-
 
     [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW")]
     internal static extern IntPtr SetWindowsHookEx(

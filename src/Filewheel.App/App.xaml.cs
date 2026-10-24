@@ -2,6 +2,9 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
+using Filewheel.Core;
+using System.IO;
+using static System.IO.Directory;
 
 namespace Filewheel.App;
 
@@ -9,16 +12,20 @@ public partial class App : Application
 {
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(2);
     private const int CopyPathSector = 2;
+    private const int DuplicateSector = 5;
+    private const int MaxNameChars = 16;
+    private const int RenameSector = 3;
 
     private MainWindow? _overlay;
     private DragMonitor? _monitor;
     private DispatcherTimer? _watchdog;
     private DispatcherTimer? _hideTimer;
     private DateTime _lastActivity = DateTime.UtcNow;
+    private bool _busy;
 
     protected override void OnStartup(StartupEventArgs e)
     {
-         Log.Start();
+        Log.Start();
         Log.Info("=== Filewheel arrancando ===");
         Log.Info(Log.FilePath is null ? "Sin archivo de log." : $"Log: {Log.FilePath}");
 
@@ -33,7 +40,6 @@ public partial class App : Application
             args.Handled = true;
             _overlay?.ShowStatus("Error: ver log");
         };
-
 
         base.OnStartup(e);
 
@@ -65,6 +71,11 @@ public partial class App : Application
         _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
         _watchdog.Tick += (_, _) =>
         {
+            if (_busy)
+            {
+                return;
+            }
+
             if (DateTime.UtcNow - _lastActivity > IdleTimeout)
             {
                 _watchdog?.Stop();
@@ -98,9 +109,14 @@ public partial class App : Application
     {
         _lastActivity = DateTime.UtcNow;
         _hideTimer?.Stop();
-                if (_overlay is null)
+        if (_overlay is null)
         {
             Log.Warn("Drop recibido sin ventana disponible.");
+            return;
+        }
+        if (_busy)
+        {
+            Log.Warn("Drop ignorado: hay una accion en curso.");
             return;
         }
 
@@ -117,30 +133,138 @@ public partial class App : Application
         Log.Info($"Drop en '{label}' (sector {sector}): {string.Join(" | ", paths)}");
         _overlay.ShowStatus($"{count}{Environment.NewLine}{label}");
 
-        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
+        if (sector == RenameSector)
         {
-            try
-            {
-                var result = Execute(sector, paths);
-                Log.Info($"Accion '{label}' terminada: {result}");
-                _overlay?.ShowStatus($"{count}{Environment.NewLine}{label}{Environment.NewLine}{result}");
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Fallo ejecutando la accion '{label}'.", ex);
-                _overlay?.ShowStatus($"{label}{Environment.NewLine}Error: {Log.Describe(ex)}");
-            }
-            HideAfter(TimeSpan.FromMilliseconds(1400));
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => BeginRename(paths)));
+            return;
+        }
+
+        Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(async () =>
+        {
+            await RunActionAsync(label, sector, paths, count);
         }));
     }
-    private static string Execute(int sector, string[] paths)
+
+    private async Task RunActionAsync(string label, int sector, string[] paths, string count)
+    {
+        _busy = true;
+        try
+        {
+            var progress = new Progress<DuplicateProgress>(p => ShowProgress(count, p));
+
+            var result = await Task.Run(() => Execute(sector, paths, progress));
+
+            Log.Info($"Accion '{label}' terminada: {result}");
+            _overlay?.ShowStatus($"{count}{Environment.NewLine}{label}{Environment.NewLine}{result}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"Fallo ejecutando la accion '{label}'.", ex);
+            _overlay?.ShowStatus($"{label}{Environment.NewLine}Error: {Log.Describe(ex)}");
+        }
+        finally
+        {
+            _busy = false;
+            _lastActivity = DateTime.UtcNow;
+            HideAfter(TimeSpan.FromMilliseconds(1400));
+        }
+    }
+    private void BeginRename(string[] paths)
+    {
+        if (paths.Length != 1)
+        {
+            Log.Warn($"Renombrar con {paths.Length} elementos: solo se admite uno.");
+            _overlay?.ShowStatus("Renombrar: uno a la vez");
+            HideAfter(TimeSpan.FromMilliseconds(1400));
+            return;
+        }
+
+        var path = paths[0];
+        var isDirectory = Directory.Exists(path);
+
+        if (!isDirectory && !File.Exists(path))
+        {
+            Log.Warn($"Renombrar sobre algo que ya no existe: {path}");
+            _overlay?.ShowStatus("Ese archivo ya no esta");
+            HideAfter(TimeSpan.FromMilliseconds(1400));
+            return;
+        }
+
+        var name = Path.GetFileName(path);
+        var stem = isDirectory ? name : Path.GetFileNameWithoutExtension(name);
+
+        if (stem.Length == 0)
+        {
+            stem = name;
+        }
+
+        NativeMethods.GetCursorPos(out var cursor);
+
+        var prompt = new RenamePrompt(name, stem, typed => CommitRename(path, typed));
+
+        _busy = true;
+        _lastActivity = DateTime.UtcNow;
+        prompt.Closed += (_, _) =>
+        {
+            _busy = false;
+            _lastActivity = DateTime.UtcNow;
+            _overlay?.HideWheel();
+        };
+
+        prompt.ShowNear(cursor.X, cursor.Y);
+    }
+
+    private static string? CommitRename(string path, string typed)
+    {
+        var result = RenameAction.Run(path, typed);
+
+        if (result.Success)
+        {
+            Log.Info($"Renombrado: {result.Source} -> {result.Target}");
+            return null;
+        }
+
+        Log.Warn($"No renombrado: {path} ({result.Error})");
+        return result.Error;
+    }
+    private void ShowProgress(string count, DuplicateProgress progress)
+    {
+        if (_overlay is null)
+        {
+            return;
+        }
+
+        var line = progress.Total is int total
+            ? $"{progress.Completed} de {total}"
+            : $"{progress.Completed} copiados";
+
+        _overlay.ShowStatus($"{count}{Environment.NewLine}{line}{Environment.NewLine}{Shorten(progress.Current)}");
+    }
+
+    private static string Shorten(string name)
+        => name.Length <= MaxNameChars ? name : name.Substring(0, MaxNameChars - 3) + "...";
+    private static string Execute(int sector, string[] paths, IProgress<DuplicateProgress>? progress = null)
     {
         if (sector == CopyPathSector)
         {
             PathClipboard.TryCopy(paths, out var message);
             return message;
         }
+        if (sector == DuplicateSector)
+        {
+            var result = DuplicateAction.Run(paths, progress);
+            foreach (var created in result.Created)
+            {
+                Log.Info($"Duplicado: {created}");
+            }
 
+            foreach (var failure in result.Failures)
+            {
+                Log.Warn($"No duplicado: {failure}");
+            }
+
+            return result.Summary;
+        }
         Log.Warn($"Sector {sector} sin accion implementada todavia.");
         return "Pendiente";
     }
@@ -157,15 +281,15 @@ public partial class App : Application
         _hideTimer.Start();
     }
 
-    private void OnCancelled()    
+    private void OnCancelled()
     {
-         Log.Info("Arrastre cancelado.");
+        Log.Info("Arrastre cancelado.");
         _lastActivity = DateTime.UtcNow;
         _overlay?.HideWheel();
     }
 
     protected override void OnExit(ExitEventArgs e)
-            
+
     {
         Log.Info("=== Filewheel cerrando ===");
         _watchdog?.Stop();
