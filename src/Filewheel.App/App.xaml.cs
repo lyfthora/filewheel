@@ -15,6 +15,7 @@ public partial class App : Application
     private const int DuplicateSector = 5;
     private const int MaxNameChars = 16;
     private const int RenameSector = 3;
+    private const int CompressSector = 0;
 
     private MainWindow? _overlay;
     private DragMonitor? _monitor;
@@ -150,7 +151,7 @@ public partial class App : Application
         _busy = true;
         try
         {
-            var progress = new Progress<DuplicateProgress>(p => ShowProgress(count, p));
+            var progress = new Progress<DuplicateProgress>(p => ShowProgress(label, p));
 
             var result = await Task.Run(() => Execute(sector, paths, progress));
 
@@ -227,7 +228,7 @@ public partial class App : Application
         Log.Warn($"No renombrado: {path} ({result.Error})");
         return result.Error;
     }
-    private void ShowProgress(string count, DuplicateProgress progress)
+    private void ShowProgress(string label, DuplicateProgress progress)
     {
         if (_overlay is null)
         {
@@ -236,15 +237,37 @@ public partial class App : Application
 
         var line = progress.Total is int total
             ? $"{progress.Completed} de {total}"
-            : $"{progress.Completed} copiados";
+            : $"{progress.Completed} elementos";
 
-        _overlay.ShowStatus($"{count}{Environment.NewLine}{line}{Environment.NewLine}{Shorten(progress.Current)}");
+        _overlay.ShowStatus($"{label}{Environment.NewLine}{line}{Environment.NewLine}{Shorten(progress.Current)}");
     }
 
     private static string Shorten(string name)
         => name.Length <= MaxNameChars ? name : name.Substring(0, MaxNameChars - 3) + "...";
     private static string Execute(int sector, string[] paths, IProgress<DuplicateProgress>? progress = null)
     {
+        if (sector == CompressSector)
+        {
+            var result = CompressAction.Run(paths, progress);
+
+            if (result.Archive.Length > 0)
+            {
+                Log.Info($"Comprimido: {result.Archive} ({result.Files} archivos)");
+            }
+
+            if (result.Error.Length > 0)
+            {
+                Log.Warn($"Compresion fallida: {result.Error}");
+            }
+
+            foreach (var failure in result.Failures)
+            {
+                Log.Warn($"No comprimido: {failure}");
+            }
+
+            return result.Summary;
+        }
+
         if (sector == CopyPathSector)
         {
             PathClipboard.TryCopy(paths, out var message);
