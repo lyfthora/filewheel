@@ -16,6 +16,7 @@ public partial class App : Application
     private const int MaxNameChars = 16;
     private const int RenameSector = 3;
     private const int CompressSector = 0;
+    private const int DeleteSector = 0;
 
     private MainWindow? _overlay;
     private DragMonitor? _monitor;
@@ -139,6 +140,11 @@ public partial class App : Application
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => BeginRename(paths)));
             return;
         }
+                if (sector == DeleteSector)
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => BeginDelete(paths)));
+            return;
+        }
 
         Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(async () =>
         {
@@ -228,6 +234,54 @@ public partial class App : Application
         Log.Warn($"No renombrado: {path} ({result.Error})");
         return result.Error;
     }
+        private void BeginDelete(string[] paths)
+    {
+        if (paths.Length == 0)
+        {
+            return;
+        }
+
+        foreach (var path in paths)
+        {
+            if (!DeleteAction.CanRecycle(path, out var reason))
+            {
+                Log.Warn($"Borrado rechazado: {path} ({reason})");
+                _overlay?.ShowStatus(reason);
+                HideAfter(TimeSpan.FromMilliseconds(1800));
+                return;
+            }
+        }
+
+        NativeMethods.GetCursorPos(out var cursor);
+
+        var subject = paths.Length == 1
+            ? Path.GetFileName(paths[0])
+            : $"{paths.Length} elementos";
+
+        var label = _overlay?.LabelFor(DeleteSector) ?? "Eliminar";
+        var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
+        var prompt = new DeletePrompt(subject);
+
+        _busy = true;
+        _lastActivity = DateTime.UtcNow;
+
+        prompt.Closed += (_, _) =>
+        {
+            _lastActivity = DateTime.UtcNow;
+
+            if (!prompt.Confirmed)
+            {
+                _busy = false;
+                _overlay?.HideWheel();
+                return;
+            }
+
+            // _busy sigue en true: el borrado lo releva sin dejar hueco.
+            _ = RunActionAsync(label, DeleteSector, paths, count);
+        };
+
+        prompt.ShowNear(cursor.X, cursor.Y);
+    }
     private void ShowProgress(string label, DuplicateProgress progress)
     {
         if (_overlay is null)
@@ -263,6 +317,27 @@ public partial class App : Application
             foreach (var failure in result.Failures)
             {
                 Log.Warn($"No comprimido: {failure}");
+            }
+
+            return result.Summary;
+        }
+                if (sector == DeleteSector)
+        {
+            var result = DeleteAction.Run(paths, progress);
+
+            foreach (var deleted in result.Deleted)
+            {
+                Log.Info($"A la papelera: {deleted}");
+            }
+
+            foreach (var failure in result.Failures)
+            {
+                Log.Warn($"No borrado: {failure}");
+            }
+
+            foreach (var warning in result.Warnings)
+            {
+                Log.Warn($"Papelera: {warning}");
             }
 
             return result.Summary;

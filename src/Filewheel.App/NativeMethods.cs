@@ -138,5 +138,56 @@ internal static class NativeMethods
         var style = GetWindowLong(hwnd, GwlExStyle);
         SetWindowLong(hwnd, GwlExStyle, style | WsExNoActivate | WsExToolWindow);
     }
+        internal const uint FoDelete = 3;
+    internal const ushort FofSilent = 0x0004;
+    internal const ushort FofNoConfirmation = 0x0010;
+    internal const ushort FofAllowUndo = 0x0040;
+    internal const ushort FofNoErrorUi = 0x0400;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct ShFileOpStruct
+    {
+        public IntPtr Hwnd;
+        public uint WFunc;
+        public string From;
+        public string? To;
+        public ushort Flags;
+        public bool AnyOperationsAborted;
+        public IntPtr NameMappings;
+        public string? ProgressTitle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ShQueryRbInfo
+    {
+        public int Size;
+        public long Bytes;
+        public long Items;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    internal static extern int SHFileOperation(ref ShFileOpStruct operation);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    internal static extern int SHQueryRecycleBin(string? root, ref ShQueryRbInfo info);
+
+    /// <summary>Manda una ruta a la papelera. Devuelve 0 si el shell lo hizo.</summary>
+    internal static int DeleteToRecycleBin(string path)
+    {
+        var operation = new ShFileOpStruct
+        {
+            WFunc = FoDelete,
+            From = path + "\0\0",
+            Flags = FofAllowUndo | FofNoConfirmation | FofSilent | FofNoErrorUi,
+        };
+
+        return SHFileOperation(ref operation);
+    }
+
+    internal static long RecycleBinItems()
+    {
+        var info = new ShQueryRbInfo { Size = Marshal.SizeOf<ShQueryRbInfo>() };
+        return SHQueryRecycleBin(null, ref info) == 0 ? info.Items : -1;
+    }
 
 }
