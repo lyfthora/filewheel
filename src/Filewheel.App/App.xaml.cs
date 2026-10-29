@@ -16,7 +16,9 @@ public partial class App : Application
     private const int MaxNameChars = 16;
     private const int RenameSector = 3;
     private const int CompressSector = 0;
-    private const int DeleteSector = 0;
+    private const int DeleteSector = 6;
+    private static readonly TimeSpan SubmenuDelay = TimeSpan.FromMilliseconds(250);
+    private const int MoveSector = 4;
 
     private MainWindow? _overlay;
     private DragMonitor? _monitor;
@@ -24,6 +26,8 @@ public partial class App : Application
     private DispatcherTimer? _hideTimer;
     private DateTime _lastActivity = DateTime.UtcNow;
     private bool _busy;
+    private DispatcherTimer? _submenuTimer;
+    private static readonly List<Destination> Destinations = BuildDestinations();
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -97,6 +101,7 @@ public partial class App : Application
     {
         _lastActivity = DateTime.UtcNow;
         _overlay?.UpdateHover(x, y);
+        UpdateSubmenu();
     }
 
     private void OnMouseReleased(int x, int y)
@@ -107,10 +112,16 @@ public partial class App : Application
         HideAfter(TimeSpan.FromMilliseconds(400));
     }
 
-    private void OnFilesDropped(int sector, string[] paths)
+    private void OnFilesDropped(DropRequest drop)
     {
         _lastActivity = DateTime.UtcNow;
         _hideTimer?.Stop();
+        _submenuTimer?.Stop();
+        _submenuTimer = null;
+
+        var paths = drop.Paths;
+        var sector = drop.Sector;
+
         if (_overlay is null)
         {
             Log.Warn("Drop recibido sin ventana disponible.");
@@ -119,6 +130,13 @@ public partial class App : Application
         if (_busy)
         {
             Log.Warn("Drop ignorado: hay una accion en curso.");
+            return;
+        }
+        _overlay.RestoreMainRing();
+
+        if (drop.Destination is not null)
+        {
+            BeginMove(paths, drop.Destination);
             return;
         }
 
@@ -140,7 +158,7 @@ public partial class App : Application
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => BeginRename(paths)));
             return;
         }
-                if (sector == DeleteSector)
+        if (sector == DeleteSector)
         {
             Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() => BeginDelete(paths)));
             return;
@@ -152,14 +170,14 @@ public partial class App : Application
         }));
     }
 
-    private async Task RunActionAsync(string label, int sector, string[] paths, string count)
+    private async Task RunActionAsync(string label, int sector, string[] paths, string count, string? destination = null)
     {
         _busy = true;
         try
         {
             var progress = new Progress<DuplicateProgress>(p => ShowProgress(label, p));
 
-            var result = await Task.Run(() => Execute(sector, paths, progress));
+            var result = await Task.Run(() => Execute(sector, paths, progress, destination));
 
             Log.Info($"Accion '{label}' terminada: {result}");
             _overlay?.ShowStatus($"{count}{Environment.NewLine}{label}{Environment.NewLine}{result}");
@@ -234,7 +252,7 @@ public partial class App : Application
         Log.Warn($"No renombrado: {path} ({result.Error})");
         return result.Error;
     }
-        private void BeginDelete(string[] paths)
+    private void BeginDelete(string[] paths)
     {
         if (paths.Length == 0)
         {
@@ -282,6 +300,123 @@ public partial class App : Application
 
         prompt.ShowNear(cursor.X, cursor.Y);
     }
+    private void BeginMove(string[] paths, string destination)
+    {
+        var label = _overlay?.LabelFor(MoveSector) ?? "Mover a";
+        var folder = Path.GetFileName(Path.TrimEndingDirectorySeparator(destination));
+        var target = folder.Length > 0 ? folder : destination;
+        var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
+
+        Log.Info($"Drop en '{label}': {string.Join(" | ", paths)} -> {destination}");
+
+        _ = RunActionAsync($"{label}: {target}", MoveSector, paths, count, destination);
+    }
+
+    /// <summary>
+    /// Abre el submenu de 'Mover a' cuando el cursor se queda quieto en ese sector,
+    /// y lo cierra si vuelve al centro. Siempre con retardo: pasar de largo no cuenta.
+    /// </summary>
+    private void UpdateSubmenu()
+    {
+        if (_overlay is null || _busy)
+        {
+            return;
+        }
+
+        var hover = _overlay.HoverSector;
+
+        if (_overlay.InMoveMode)
+        {
+            if (hover < 0 && _submenuTimer is null)
+            {
+                DeferSubmenu(() =>
+                {
+                    if (_overlay is { InMoveMode: true } && _overlay.HoverSector < 0 && !_busy)
+                    {
+                        _overlay.RestoreMainRing();
+                        Log.Info("Submenu 'Mover a' cerrado.");
+                    }
+                });
+            }
+
+            return;
+        }
+
+        if (hover != MoveSector || _submenuTimer is not null)
+        {
+            return;
+        }
+
+        DeferSubmenu(() =>
+        {
+            if (_overlay is null || _busy || _overlay.InMoveMode || _overlay.HoverSector != MoveSector)
+            {
+                return;
+            }
+
+            if (Destinations.Count == 0)
+            {
+                Log.Warn("'Mover a' sin carpetas de destino.");
+                _overlay.ShowStatus("Sin destinos");
+                HideAfter(TimeSpan.FromMilliseconds(1400));
+                return;
+            }
+
+            var labels = new string[Destinations.Count];
+            var folders = new string[Destinations.Count];
+
+            for (var index = 0; index < Destinations.Count; index++)
+            {
+                labels[index] = Destinations[index].Label;
+                folders[index] = Destinations[index].Folder;
+            }
+
+            _overlay.ShowDestinations(labels, folders);
+            Log.Info($"Submenu 'Mover a': {string.Join(", ", labels)}");
+        });
+    }
+
+    private void DeferSubmenu(Action action)
+    {
+        _submenuTimer = new DispatcherTimer { Interval = SubmenuDelay };
+        _submenuTimer.Tick += (_, _) =>
+        {
+            _submenuTimer?.Stop();
+            _submenuTimer = null;
+            action();
+        };
+        _submenuTimer.Start();
+    }
+
+    private static List<Destination> BuildDestinations()
+    {
+        var profile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        var candidates = new[]
+        {
+            new Destination("Escritorio", Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)),
+            new Destination("Documentos", Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments)),
+            new Destination("Descargas", Path.Combine(profile, "Downloads")),
+            new Destination("Imagenes", Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)),
+            new Destination("Musica", Environment.GetFolderPath(Environment.SpecialFolder.MyMusic)),
+            new Destination("Videos", Environment.GetFolderPath(Environment.SpecialFolder.MyVideos)),
+        };
+
+        var found = new List<Destination>();
+
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Folder.Length > 0 && Directory.Exists(candidate.Folder))
+            {
+                found.Add(candidate);
+            }
+        }
+
+        return found;
+    }
+
+    private sealed record Destination(string Label, string Folder);
+
     private void ShowProgress(string label, DuplicateProgress progress)
     {
         if (_overlay is null)
@@ -298,9 +433,32 @@ public partial class App : Application
 
     private static string Shorten(string name)
         => name.Length <= MaxNameChars ? name : name.Substring(0, MaxNameChars - 3) + "...";
-    private static string Execute(int sector, string[] paths, IProgress<DuplicateProgress>? progress = null)
+    private static string Execute(int sector, string[] paths, IProgress<DuplicateProgress>? progress = null, string? destination = null)
     {
+        if (sector == MoveSector)
+        {
+            if (destination is null)
+            {
+                return "Sin destino";
+            }
+
+            var moved = MoveAction.Run(paths, destination, progress);
+
+            foreach (var path in moved.Moved)
+            {
+                Log.Info($"Movido: {path}");
+            }
+
+            foreach (var failure in moved.Failures)
+            {
+                Log.Warn($"No movido: {failure}");
+            }
+
+            return moved.Summary;
+        }
+
         if (sector == CompressSector)
+
         {
             var result = CompressAction.Run(paths, progress);
 
@@ -321,7 +479,7 @@ public partial class App : Application
 
             return result.Summary;
         }
-                if (sector == DeleteSector)
+        if (sector == DeleteSector)
         {
             var result = DeleteAction.Run(paths, progress);
 
