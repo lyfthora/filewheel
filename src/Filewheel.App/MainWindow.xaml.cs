@@ -6,25 +6,29 @@ namespace Filewheel.App;
 
 public partial class MainWindow : Window
 {
+    private static readonly string[] MainLabels =
+{
+        "Comprimir",
+        "Convertir",
+        "Copiar ruta",
+        "Renombrar",
+        "Mover a",
+        "Duplicar",
+        "Eliminar",
+        "Ajustes",
+    };
+
     private double _scale = 1.0;
     private double _left;
     private double _top;
+    private IReadOnlyList<string>? _destinations;
+    private IReadOnlyList<string>? _destinationFolders;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        Wheel.Labels = new[]
-        {
-            "Comprimir",
-            "Convertir",
-            "Copiar ruta",
-            "Renombrar",
-            "Mover a",
-            "Duplicar",
-            "Eliminar",
-            "Ajustes",
-        };
+        Wheel.Labels = MainLabels;
     }
 
     public void ShowAt(int screenX, int screenY)
@@ -70,8 +74,42 @@ public partial class MainWindow : Window
         return Wheel.HitTestSector(local);
     }
 
+    public void ShowDestinations(IReadOnlyList<string> labels, IReadOnlyList<string> folders)
+    {
+        _destinations = labels;
+        _destinationFolders = folders;
+        Wheel.Labels = labels;
+        Wheel.HoverIndex = -1;
+        Wheel.CenterText = "Suelta en el destino";
+    }
+
+    public void RestoreMainRing()
+    {
+        if (_destinations is null)
+        {
+            return;
+        }
+
+        _destinations = null;
+        _destinationFolders = null;
+        Wheel.Labels = MainLabels;
+        Wheel.HoverIndex = -1;
+        Wheel.CenterText = string.Empty;
+    }
+
+    public bool InMoveMode => _destinations is not null;
+
+    public int HoverSector => Wheel.HoverIndex;
+
+    /// <summary>La carpeta del destino, no la etiqueta que se pinta.</summary>
+    public string? DestinationAt(int sector)
+        => _destinationFolders is not null && sector >= 0 && sector < _destinationFolders.Count
+            ? _destinationFolders[sector]
+            : null;
+
     public void HideWheel()
     {
+        RestoreMainRing();
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
         if (IsVisible)
@@ -80,7 +118,7 @@ public partial class MainWindow : Window
         }
     }
     // se soltaron archivbos sobre la rueda; (sector, rutas). sector = -1 si nno habia sector
-    public event Action<int, string[]>? FilesDropped;
+    public event Action<DropRequest>? FilesDropped;
     public string LabelFor(int sector) => sector >= 0 && sector < Wheel.Labels.Count ? Wheel.Labels[sector] : string.Empty;
     public void ShowStatus(string message)
     {
@@ -106,6 +144,10 @@ public partial class MainWindow : Window
         {
             return;
         }
-        FilesDropped?.Invoke(ResolveSector(screenX, screenY), paths);
+
+        var sector = ResolveSector(screenX, screenY);
+        FilesDropped?.Invoke(new DropRequest(sector, DestinationAt(sector), paths));
     }
 }
+
+public sealed record DropRequest(int Sector, string? Destination, string[] Paths);
