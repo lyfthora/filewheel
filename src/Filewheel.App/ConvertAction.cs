@@ -60,10 +60,15 @@ public static class ConvertAction
 
                 // DestinationPath ya devuelve un nombre libre: si 'test.jpg' existe,
                 // la conversion acaba en 'testjpg.jpg' y el que ya estaba no se toca.
-                var destination = DestinationPath(path, target);
+                var destination = DestinationPath(path, target, out var renamed);
 
                 ConvertInPlace(path, destination, target);
                 result.Converted.Add(destination);
+
+                if (renamed)
+                {
+                    result.Renamed.Add(Path.GetFileName(destination));
+                }
             }
             catch (SkipException ex)
             {
@@ -251,21 +256,25 @@ public static class ConvertAction
     /// <summary>
     /// El nombre que ocupara el original. Si ya hay algo ahi no se pisa: se prueba el nombre
     /// con el formato pegado ('test.png' -> 'testjpg.jpg') y, si tambien esta ocupado, se numera.
+    /// 'renamed' avisa de que el nombre final no es el obvio, para poder decirlo en pantalla.
     /// </summary>
-    private static string DestinationPath(string source, string format)
+    private static string DestinationPath(string source, string format, out bool renamed)
     {
         var directory = Path.GetDirectoryName(source)
             ?? throw new IOException("La ruta no tiene carpeta contenedora.");
 
         var baseName = Path.GetFileNameWithoutExtension(source);
-        var candidate = Path.Combine(directory, baseName + "." + format);
+        var plain = Path.Combine(directory, baseName + "." + format);
 
-        if (IsFree(candidate))
+        if (IsFree(plain))
         {
-            return candidate;
+            renamed = false;
+            return plain;
         }
 
-        candidate = Path.Combine(directory, baseName + format + "." + format);
+        renamed = true;
+
+        var candidate = Path.Combine(directory, baseName + format + "." + format);
 
         if (IsFree(candidate))
         {
@@ -319,6 +328,9 @@ public sealed class ConvertResult
 
     public List<string> Failures { get; } = new();
 
+    /// <summary>Nombres finales que no coinciden con el obvio porque el destino estaba ocupado.</summary>
+    public List<string> Renamed { get; } = new();
+
     public string Error { get; set; } = string.Empty;
 
     public string Summary
@@ -337,7 +349,13 @@ public sealed class ConvertResult
 
             if (Failures.Count == 0)
             {
-                return Converted.Count == 1 ? "Convertido" : $"Convertidos {Converted.Count}";
+                if (Converted.Count == 1)
+                {
+                    // Si hubo que cambiar el nombre, se dice: el archivo no se llama como se esperaba.
+                    return Renamed.Count == 1 ? $"Convertido como {Renamed[0]}" : "Convertido";
+                }
+
+                return $"Convertidos {Converted.Count}";
             }
 
             if (Converted.Count == 0)
