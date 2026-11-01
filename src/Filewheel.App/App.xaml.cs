@@ -19,6 +19,7 @@ public partial class App : Application
     private const int DeleteSector = 6;
     private static readonly TimeSpan SubmenuDelay = TimeSpan.FromMilliseconds(250);
     private const int MoveSector = 4;
+    private const int ConvertSector = 1;
 
     private MainWindow? _overlay;
     private DragMonitor? _monitor;
@@ -132,11 +133,21 @@ public partial class App : Application
             Log.Warn("Drop ignorado: hay una accion en curso.");
             return;
         }
+        // Hay que leerlo antes de restaurar: al volver a la rueda principal se olvida.
+        var submenu = _overlay.Submenu;
         _overlay.RestoreMainRing();
 
         if (drop.Destination is not null)
         {
-            BeginMove(paths, drop.Destination);
+            if (submenu == SubmenuKind.Convert)
+            {
+                BeginConvert(paths, drop.Destination);
+            }
+            else
+            {
+                BeginMove(paths, drop.Destination);
+            }
+
             return;
         }
 
@@ -312,8 +323,19 @@ public partial class App : Application
         _ = RunActionAsync($"{label}: {target}", MoveSector, paths, count, destination);
     }
 
+    private void BeginConvert(string[] paths, string format)
+    {
+        var label = _overlay?.LabelFor(ConvertSector) ?? "Convertir";
+        var target = format.ToUpperInvariant();
+        var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
+
+        Log.Info($"Drop en '{label}': {string.Join(" | ", paths)} -> {format}");
+
+        _ = RunActionAsync($"{label}: {target}", ConvertSector, paths, count, format);
+    }
+
     /// <summary>
-    /// Abre el submenu de 'Mover a' cuando el cursor se queda quieto en ese sector,
+    /// Abre el submenu de 'Mover a' o el de 'Convertir' cuando el cursor se queda quieto en ese sector,
     /// y lo cierra si vuelve al centro. Siempre con retardo: pasar de largo no cuenta.
     /// </summary>
     private void UpdateSubmenu()
@@ -325,16 +347,16 @@ public partial class App : Application
 
         var hover = _overlay.HoverSector;
 
-        if (_overlay.InMoveMode)
+        if (_overlay.InSubmenu)
         {
             if (hover < 0 && _submenuTimer is null)
             {
                 DeferSubmenu(() =>
                 {
-                    if (_overlay is { InMoveMode: true } && _overlay.HoverSector < 0 && !_busy)
+                    if (_overlay is { InSubmenu: true } && _overlay.HoverSector < 0 && !_busy)
                     {
                         _overlay.RestoreMainRing();
-                        Log.Info("Submenu 'Mover a' cerrado.");
+                        Log.Info("Submenu cerrado.");
                     }
                 });
             }
@@ -342,38 +364,75 @@ public partial class App : Application
             return;
         }
 
-        if (hover != MoveSector || _submenuTimer is not null)
+        if ((hover != MoveSector && hover != ConvertSector) || _submenuTimer is not null)
         {
             return;
         }
 
+        // Se guarda el sector ahora: el cursor puede seguir moviendose durante el retardo.
+        var sector = hover;
+
         DeferSubmenu(() =>
         {
-            if (_overlay is null || _busy || _overlay.InMoveMode || _overlay.HoverSector != MoveSector)
+            if (_overlay is null || _busy || _overlay.InSubmenu || _overlay.HoverSector != sector)
             {
                 return;
             }
 
-            if (Destinations.Count == 0)
+            if (sector == ConvertSector)
             {
-                Log.Warn("'Mover a' sin carpetas de destino.");
-                _overlay.ShowStatus("Sin destinos");
-                HideAfter(TimeSpan.FromMilliseconds(1400));
+                ShowConvertSubmenu();
                 return;
             }
 
-            var labels = new string[Destinations.Count];
-            var folders = new string[Destinations.Count];
-
-            for (var index = 0; index < Destinations.Count; index++)
-            {
-                labels[index] = Destinations[index].Label;
-                folders[index] = Destinations[index].Folder;
-            }
-
-            _overlay.ShowDestinations(labels, folders);
-            Log.Info($"Submenu 'Mover a': {string.Join(", ", labels)}");
+            ShowMoveSubmenu();
         });
+    }
+
+    private void ShowMoveSubmenu()
+    {
+        if (_overlay is null)
+        {
+            return;
+        }
+
+        if (Destinations.Count == 0)
+        {
+            Log.Warn("'Mover a' sin carpetas de destino.");
+            _overlay.ShowStatus("Sin destinos");
+            HideAfter(TimeSpan.FromMilliseconds(1400));
+            return;
+        }
+
+        var labels = new string[Destinations.Count];
+        var values = new string[Destinations.Count];
+
+        for (var index = 0; index < Destinations.Count; index++)
+        {
+            labels[index] = Destinations[index].Label;
+            values[index] = Destinations[index].Folder;
+        }
+
+        _overlay.ShowDestinations(labels, values, SubmenuKind.Move);
+        Log.Info($"Submenu 'Mover a': {string.Join(", ", labels)}");
+    }
+
+    private void ShowConvertSubmenu()
+    {
+        if (_overlay is null)
+        {
+            return;
+        }
+
+        var labels = new string[ConvertAction.Formats.Length];
+
+        for (var index = 0; index < labels.Length; index++)
+        {
+            labels[index] = ConvertAction.Formats[index].ToUpperInvariant();
+        }
+
+        _overlay.ShowDestinations(labels, ConvertAction.Formats, SubmenuKind.Convert);
+        Log.Info($"Submenu 'Convertir': {string.Join(", ", labels)}");
     }
 
     private void DeferSubmenu(Action action)
@@ -479,6 +538,29 @@ public partial class App : Application
 
             return result.Summary;
         }
+
+        if (sector == ConvertSector)
+        {
+            if (destination is null)
+            {
+                return "Sin formato";
+            }
+
+            var converted = ConvertAction.Run(paths, destination, progress);
+
+            foreach (var created in converted.Converted)
+            {
+                Log.Info($"Convertido en su sitio: {created} (original a la papelera)");
+            }
+
+            foreach (var failure in converted.Failures)
+            {
+                Log.Warn($"No convertido: {failure}");
+            }
+
+            return converted.Summary;
+        }
+
         if (sector == DeleteSector)
         {
             var result = DeleteAction.Run(paths, progress);
