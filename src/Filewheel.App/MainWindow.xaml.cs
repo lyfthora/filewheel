@@ -74,13 +74,18 @@ public partial class MainWindow : Window
         return Wheel.HitTestSector(local);
     }
 
-    public void ShowDestinations(IReadOnlyList<string> labels, IReadOnlyList<string> folders)
+    /// <summary>
+    /// Cambia la rueda por un submenu. 'values' es lo que devuelve el sector al soltar
+    /// (una carpeta al mover, un formato al convertir) y no tiene por que parecerse a la etiqueta.
+    /// </summary>
+    public void ShowDestinations(IReadOnlyList<string> labels, IReadOnlyList<string> values, SubmenuKind kind)
     {
         _destinations = labels;
-        _destinationFolders = folders;
+        _destinationFolders = values;
+        Submenu = kind;
         Wheel.Labels = labels;
         Wheel.HoverIndex = -1;
-        Wheel.CenterText = "Suelta en el destino";
+        Wheel.CenterText = kind == SubmenuKind.Convert ? "Suelta en el formato" : "Suelta en el destino";
     }
 
     public void RestoreMainRing()
@@ -92,12 +97,18 @@ public partial class MainWindow : Window
 
         _destinations = null;
         _destinationFolders = null;
+        Submenu = SubmenuKind.None;
         Wheel.Labels = MainLabels;
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
     }
 
-    public bool InMoveMode => _destinations is not null;
+    public bool InMoveMode => Submenu == SubmenuKind.Move;
+
+    /// <summary>Hay un submenu abierto, sea el de mover o el de convertir.</summary>
+    public bool InSubmenu => Submenu != SubmenuKind.None;
+
+    public SubmenuKind Submenu { get; private set; }
 
     public int HoverSector => Wheel.HoverIndex;
 
@@ -151,3 +162,11 @@ public partial class MainWindow : Window
 }
 
 public sealed record DropRequest(int Sector, string? Destination, string[] Paths);
+
+/// <summary>Que esta mostrando la rueda: los sectores de siempre o un submenu concreto.</summary>
+public enum SubmenuKind
+{
+    None,
+    Move,
+    Convert,
+}

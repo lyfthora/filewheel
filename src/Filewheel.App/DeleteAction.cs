@@ -66,6 +66,21 @@ public static class DeleteAction
         return result;
     }
 
+    /// <summary>
+    /// Manda un solo archivo a la papelera, sin progreso ni resumen.
+    /// Devuelve cadena vacia si fue bien, o el motivo por el que no se pudo.
+    /// </summary>
+    public static string Recycle(string path)
+    {
+        if (!CanRecycle(path, out var reason))
+        {
+            return reason;
+        }
+
+        var code = NativeMethods.DeleteToRecycleBin(path);
+        return code == 0 ? string.Empty : Describe(code);
+    }
+
     public static bool CanRecycle(string path, out string reason)
     {
         reason = string.Empty;
