@@ -101,25 +101,6 @@ public sealed class WheelView : FrameworkElement
             var geometry = CreateSector(center, radius, innerRadius, start, end);
             var isHovered = index == _hoverIndex;
             drawingContext.DrawGeometry(isHovered ? HoverFill : BaseFill, EdgePen, geometry);
-            if (_centerText.Length > 0)
-            {
-                var status = new FormattedText(
-                _centerText,
-                CultureInfo.CurrentUICulture,
-                FlowDirection.LeftToRight,
-                LabelTypeface,
-                12.0,
-                LabelBrush,
-                pixelsPerDip)
-                {
-                    MaxTextWidth = innerRadius * 1.5,
-                    TextAlignment = TextAlignment.Center,
-                };
-                drawingContext.DrawText(
-                status,
-                new Point(center.X - (innerRadius * 0.75), center.Y - (status.Height / 2)));
-            }
-
             var text = new FormattedText(
             _labels[index],
             CultureInfo.CurrentUICulture,
@@ -131,6 +112,25 @@ public sealed class WheelView : FrameworkElement
 
             var textCenter = PointOn(center, (radius + innerRadius) / 2, start + ((end - start) / 2));
             drawingContext.DrawText(text, new Point(textCenter.X - (text.Width / 2), textCenter.Y - (text.Height / 2)));
+        }
+
+        if (_centerText.Length > 0)
+        {
+            var status = new FormattedText(
+            _centerText,
+            CultureInfo.CurrentUICulture,
+            FlowDirection.LeftToRight,
+            LabelTypeface,
+            12.0,
+            LabelBrush,
+            pixelsPerDip)
+            {
+                MaxTextWidth = innerRadius * 1.5,
+                TextAlignment = TextAlignment.Center,
+            };
+            drawingContext.DrawText(
+            status,
+            new Point(center.X - (innerRadius * 0.75), center.Y - (status.Height / 2)));
         }
     }
 

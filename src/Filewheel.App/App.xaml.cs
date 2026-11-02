@@ -184,11 +184,12 @@ public partial class App : Application
     private async Task RunActionAsync(string label, int sector, string[] paths, string count, string? destination = null)
     {
         _busy = true;
+        var result = string.Empty;   // el 'finally' tambien necesita el texto del aviso
         try
         {
             var progress = new Progress<DuplicateProgress>(p => ShowProgress(label, p));
 
-            var result = await Task.Run(() => Execute(sector, paths, progress, destination));
+            result = await Task.Run(() => Execute(sector, paths, progress, destination));
 
             Log.Info($"Accion '{label}' terminada: {result}");
             _overlay?.ShowStatus($"{count}{Environment.NewLine}{label}{Environment.NewLine}{result}");
@@ -202,7 +203,7 @@ public partial class App : Application
         {
             _busy = false;
             _lastActivity = DateTime.UtcNow;
-            HideAfter(TimeSpan.FromMilliseconds(1400));
+            HideAfter(LingerFor(result));
         }
     }
     private void BeginRename(string[] paths)
@@ -550,7 +551,7 @@ public partial class App : Application
 
             foreach (var created in converted.Converted)
             {
-                Log.Info($"Convertido en su sitio: {created} (original a la papelera)");
+                Log.Info($"Convertido: {created} (el original se queda)");
             }
 
             foreach (var failure in converted.Failures)
@@ -617,6 +618,23 @@ public partial class App : Application
             _overlay?.HideWheel();
         };
         _hideTimer.Start();
+    }
+
+    /// <summary>
+    /// Plazo para leer el aviso: el texto base gasta ~1,4 s, pero un nombre de archivo
+    /// ('Convertido como chocajpg (2).jpg') pide mas. Tope de 3 s para no dejar la rueda clavada.
+    /// </summary>
+    private static TimeSpan LingerFor(string text)
+    {
+        var extra = text.Length > 10 ? (text.Length - 10) * 60 : 0;
+        var ms = 1400 + extra;
+
+        if (ms > 3000)
+        {
+            ms = 3000;
+        }
+
+        return TimeSpan.FromMilliseconds(ms);
     }
 
     private void OnCancelled()

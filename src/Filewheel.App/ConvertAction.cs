@@ -11,8 +11,8 @@ namespace Filewheel.App;
 /// <summary>
 /// Convierte imagenes a otro formato usando los codificadores que ya trae WPF:
 /// ni paquetes nuevos ni programas externos.
-/// Convierte el archivo en su sitio: la imagen nueva ocupa el nombre del original
-/// (o el alternativo, si ese ya esta ocupado) y el original se va a la papelera.
+/// Deja el original donde esta y escribe la imagen nueva al lado, con el formato nuevo:
+/// 'test.jpg' a png da 'test.png' (o 'test (2).png' si ese nombre ya esta ocupado).
 /// </summary>
 public static class ConvertAction
 {
@@ -58,11 +58,11 @@ public static class ConvertAction
                     continue;
                 }
 
-                // DestinationPath ya devuelve un nombre libre: si 'test.jpg' existe,
-                // la conversion acaba en 'testjpg.jpg' y el que ya estaba no se toca.
+                // DestinationPath ya devuelve un nombre libre: si 'test.png' existe,
+                // la conversion acaba en 'test (2).png' y el que ya estaba no se toca.
                 var destination = DestinationPath(path, target, out var renamed);
 
-                ConvertInPlace(path, destination, target);
+                ConvertTo(path, destination, target);
                 result.Converted.Add(destination);
 
                 if (renamed)
@@ -89,11 +89,11 @@ public static class ConvertAction
     }
 
     /// <summary>
-    /// Convierte sin dejar copia. Se escribe al lado con un nombre temporal, se comprueba
-    /// que la imagen nueva se puede leer, ocupa el nombre final y solo entonces el original
-    /// se va a la papelera. Cualquier fallo antes de ese ultimo paso deja el original intacto.
+    /// Escribe la conversion al lado con un nombre temporal y comprueba que la imagen nueva
+    /// se puede leer antes de darle el nombre final. El original no se toca: lo unico que
+    /// se crea es el archivo nuevo.
     /// </summary>
-    private static void ConvertInPlace(string source, string destination, string format)
+    private static void ConvertTo(string source, string destination, string format)
     {
         var temp = destination + ".convirtiendo";
 
@@ -109,15 +109,6 @@ public static class ConvertAction
 
             // El mismo volumen y la misma carpeta: el rename no puede fallar a medias.
             File.Move(temp, destination);
-
-            var error = DeleteAction.Recycle(source);
-
-            if (error.Length > 0)
-            {
-                // Sin original en la papelera no hay conversion en sitio: se deshace.
-                File.Delete(destination);
-                throw new IOException($"el original no se pudo quitar: {error}");
-            }
         }
         finally
         {
@@ -254,9 +245,9 @@ public static class ConvertAction
     }
 
     /// <summary>
-    /// El nombre que ocupara el original. Si ya hay algo ahi no se pisa: se prueba el nombre
-    /// con el formato pegado ('test.png' -> 'testjpg.jpg') y, si tambien esta ocupado, se numera.
-    /// 'renamed' avisa de que el nombre final no es el obvio, para poder decirlo en pantalla.
+    /// El nombre del archivo nuevo. Si ya hay algo ahi no se pisa: se numera como hace
+    /// el Explorador ('test.jpg' -> 'test (2).png'). 'renamed' avisa de que el nombre
+    /// final lleva numero, para poder decirlo en pantalla.
     /// </summary>
     private static string DestinationPath(string source, string format, out bool renamed)
     {
@@ -274,16 +265,9 @@ public static class ConvertAction
 
         renamed = true;
 
-        var candidate = Path.Combine(directory, baseName + format + "." + format);
-
-        if (IsFree(candidate))
-        {
-            return candidate;
-        }
-
         for (var attempt = 2; attempt <= 999; attempt++)
         {
-            candidate = Path.Combine(directory, $"{baseName}{format} ({attempt}).{format}");
+            var candidate = Path.Combine(directory, $"{baseName} ({attempt}).{format}");
 
             if (IsFree(candidate))
             {
