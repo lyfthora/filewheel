@@ -88,6 +88,24 @@ public partial class MainWindow : Window
         Wheel.CenterText = kind == SubmenuKind.Convert ? "Suelta en el formato" : "Suelta en el destino";
     }
 
+    /// <summary>
+    /// Arrastre recien empezado: todavia no sabemos que lleva encima, asi que no pintamos ningun
+    /// anillo. Pintar el principal y cambiarlo medio segundo despues se ve como un parpadeo.
+    /// </summary>
+    public void ShowPendingRing()
+    {
+        _draggedPaths = null;
+        _destinations = null;
+        _destinationFolders = null;
+        Submenu = SubmenuKind.None;
+        Wheel.Labels = Array.Empty<string>();
+        Wheel.HoverIndex = -1;
+        Wheel.CenterText = string.Empty;
+    }
+
+    /// <summary>Hay algun anillo puesto (si no, la rueda esta esperando saber que arrastras).</summary>
+    public bool HasRing => Wheel.Labels.Count > 0;
+
     public void RestoreMainRing()
     {
         if (_destinations is null)
@@ -112,6 +130,9 @@ public partial class MainWindow : Window
 
     public int HoverSector => Wheel.HoverIndex;
 
+    /// <summary>Las rutas del arrastre que pasa por encima; se olvidan al siguiente arrastre.</summary>
+    private string[]? _draggedPaths;
+
     /// <summary>La carpeta del destino, no la etiqueta que se pinta.</summary>
     public string? DestinationAt(int sector)
         => _destinationFolders is not null && sector >= 0 && sector < _destinationFolders.Count
@@ -120,6 +141,7 @@ public partial class MainWindow : Window
 
     public void HideWheel()
     {
+        _draggedPaths = null;   // el siguiente arrastre avisa otra vez, aunque sea el mismo archivo
         RestoreMainRing();
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
@@ -130,6 +152,8 @@ public partial class MainWindow : Window
     }
     // se soltaron archivbos sobre la rueda; (sector, rutas). sector = -1 si nno habia sector
     public event Action<DropRequest>? FilesDropped;
+    // llegan las rutas de un arrastre en curso, antes de soltar nada
+    public event Action<string[]>? FilesDragged;
     public string LabelFor(int sector) => sector >= 0 && sector < Wheel.Labels.Count ? Wheel.Labels[sector] : string.Empty;
     public void ShowStatus(string message)
     {
@@ -137,14 +161,41 @@ public partial class MainWindow : Window
     }
     private void OnDragEnter(object sender, DragEventArgs e)
     {
+        Remember(e.Data);
+
         e.Effects = AcceptDrop(e.Data);
         e.Handled = true;
     }
     private void OnDropFiles(object sender, DragEventArgs e)
     {
+        // por si la app de origen no entrego las rutas al entrar: ultima oportunidad
+        Remember(e.Data);
+
         e.Handled = true;
         NativeMethods.GetCursorPos(out var cursor);
         HandleDrop(e.Data, cursor.X, cursor.Y);
+        _draggedPaths = null;
+    }
+    /// <summary>
+    /// Se llama al empezar un arrastre nuevo: lo recordado del anterior ya no vale, aunque se
+    /// vuelvan a arrastrar exactamente los mismos archivos.
+    /// </summary>
+    public void ForgetDraggedPaths() => _draggedPaths = null;
+    // guarda lo arrastrado y avisa una sola vez por arrastre (no en cada DragEnter del mismo)
+    private void Remember(IDataObject data)
+    {
+        if (data.GetData(DataFormats.FileDrop) is not string[] paths || paths.Length == 0)
+        {
+            return;
+        }
+
+        if (_draggedPaths is not null && _draggedPaths.SequenceEqual(paths, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _draggedPaths = paths;
+        FilesDragged?.Invoke(paths);
     }
     // solo aceptmosa arrastres que traen rutas de archivos
     private static DragDropEffects AcceptDrop(IDataObject data) => data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
