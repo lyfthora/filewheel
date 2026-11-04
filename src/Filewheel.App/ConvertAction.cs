@@ -21,6 +21,24 @@ public static class ConvertAction
     /// <summary>Formatos ofrecidos en el submenu: en minusculas y sin punto. El orden manda en la rueda.</summary>
     public static readonly string[] Formats = { "png", "jpg", "bmp", "tiff", "gif" };
 
+    /// <summary>Lo que se ofrece al arrastrar video: lo escribe ffmpeg, no WPF.</summary>
+    public static readonly string[] VideoFormats = { "mp4", "mkv", "avi", "mov", "webm", "gif" };
+
+    /// <summary>Lo que se ofrece al arrastrar audio: tambien por ffmpeg.</summary>
+    public static readonly string[] AudioFormats = { "mp3", "wav", "flac", "m4a", "ogg" };
+
+    /// <summary>
+    /// Que formatos tienen sentido para lo que se arrastra. Sin tipo conocido se ofrece lo de
+    /// siempre, para no romper el caso de las apps que no cuentan que llevan arrastrando.
+    /// </summary>
+    public static string[] FormatsFor(FileKind kind) => kind switch
+    {
+        FileKind.Image or FileKind.None => Formats,
+        FileKind.Video => VideoFormats,
+        FileKind.Audio => AudioFormats,
+        _ => Array.Empty<string>(),
+    };
+
     public static ConvertResult Run(IReadOnlyList<string> paths, string format, IProgress<DuplicateProgress>? progress = null)
     {
         var result = new ConvertResult();
@@ -32,9 +50,17 @@ public static class ConvertAction
 
         var target = Normalize(format);
 
-        if (Array.IndexOf(Formats, target) < 0)
+        if (!IsKnownTarget(target))
         {
             result.Error = "Ese formato no esta soportado.";
+            return result;
+        }
+
+        // Video y audio los escribe ffmpeg. Sin el, mejor decirlo antes de intentarlo archivo a archivo.
+        if (!IsImageTarget(target) && !FFmpeg.Available)
+        {
+            Log.Warn("Video y audio necesitan ffmpeg: copia ffmpeg.exe en tools\\ o instala con 'winget install Gyan.FFmpeg'.");
+            result.Error = "Falta ffmpeg";
             return result;
         }
 
@@ -62,7 +88,16 @@ public static class ConvertAction
                 // la conversion acaba en 'test (2).png' y el que ya estaba no se toca.
                 var destination = DestinationPath(path, target, out var renamed);
 
-                ConvertTo(path, destination, target);
+                // WPF para imagenes; ffmpeg para video y audio, que WPF no sabe escribir.
+                if (IsImageTarget(target) && FileKinds.KindOf(path) == FileKind.Image)
+                {
+                    ConvertTo(path, destination, target);
+                }
+                else
+                {
+                    FFmpeg.ConvertTo(path, destination, target);
+                }
+
                 result.Converted.Add(destination);
 
                 if (renamed)
@@ -282,6 +317,13 @@ public static class ConvertAction
 
     private static bool SameFormat(string path, string format) => Normalize(Path.GetExtension(path)) == format;
 
+    private static bool IsImageTarget(string target) => Array.IndexOf(Formats, target) >= 0;
+
+    private static bool IsKnownTarget(string target)
+        => IsImageTarget(target)
+            || Array.IndexOf(VideoFormats, target) >= 0
+            || Array.IndexOf(AudioFormats, target) >= 0;
+
     private static string Normalize(string value)
     {
         var text = (value ?? string.Empty).Trim().TrimStart('.').ToLowerInvariant();
@@ -292,6 +334,7 @@ public static class ConvertAction
     {
         FileFormatException => "no es una imagen",
         NotSupportedException => "no es una imagen",
+        InvalidOperationException => ex.Message,
         UnauthorizedAccessException => "sin permisos",
         IOException => ex.Message,
         _ => $"{ex.GetType().Name}: {ex.Message}",

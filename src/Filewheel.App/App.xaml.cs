@@ -18,16 +18,24 @@ public partial class App : Application
     private const int CompressSector = 0;
     private const int DeleteSector = 6;
     private static readonly TimeSpan SubmenuDelay = TimeSpan.FromMilliseconds(250);
+
+    // Para volver del submenu al anillo principal hay que quedarse quieto en el centro: pasar
+    // cerca no cuenta. Es largo a proposito, porque la rueda nace centrada en el cursor y si no
+    // los formatos desaparecian solos antes de poder elegir.
+    private static readonly TimeSpan CenterDwell = TimeSpan.FromMilliseconds(1200);
     private const int MoveSector = 4;
     private const int ConvertSector = 1;
 
     private MainWindow? _overlay;
+    private FileKind _dragKind = FileKind.None;   // tipo de lo que se arrastra ahora
+    private bool _convertWarned;                  // ya avisamos de que este tipo no se convierte
     private DragMonitor? _monitor;
     private DispatcherTimer? _watchdog;
     private DispatcherTimer? _hideTimer;
     private DateTime _lastActivity = DateTime.UtcNow;
     private bool _busy;
     private DispatcherTimer? _submenuTimer;
+    private DispatcherTimer? _kindTimer;        // anillo principal si el arrastre no trae archivos
     private static readonly List<Destination> Destinations = BuildDestinations();
 
     protected override void OnStartup(StartupEventArgs e)
@@ -52,6 +60,7 @@ public partial class App : Application
 
         _overlay = new MainWindow();
         _overlay.FilesDropped += OnFilesDropped;
+        _overlay.FilesDragged += OnFilesDragged;
 
         _monitor = new DragMonitor();
         _monitor.DragStarted += OnDragStarted;
@@ -95,7 +104,38 @@ public partial class App : Application
     private void OnDragStarted(int x, int y)
     {
         _lastActivity = DateTime.UtcNow;
+        _dragKind = FileKind.None;   // arrastre nuevo: todavia no sabemos que es
+        _convertWarned = false;
+        _overlay?.ForgetDraggedPaths();   // aunque se arrastre el mismo archivo que antes
+        _overlay?.ShowPendingRing();   // sin anillo: aun no sabemos que arrastras
         _overlay?.ShowAt(x, y);
+        StartKindFallback();
+    }
+
+    // Los datos del arrastre llegan unos milisegundos despues de que aparezca la rueda. Si el
+    // arrastre no trae archivos, o tarda, a los 250 ms ponemos el anillo principal.
+    private void StartKindFallback()
+    {
+        StopKindFallback();
+        _kindTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
+        _kindTimer.Tick += (_, _) =>
+        {
+            StopKindFallback();
+
+            if (_overlay is not { IsVisible: true } || _overlay.HasRing || _dragKind != FileKind.None)
+            {
+                return;
+            }
+
+            _overlay.RestoreMainRing();
+        };
+        _kindTimer.Start();
+    }
+
+    private void StopKindFallback()
+    {
+        _kindTimer?.Stop();
+        _kindTimer = null;
     }
 
     private void OnMoved(int x, int y)
@@ -112,6 +152,52 @@ public partial class App : Application
         // fuera de la rueda- este plazo oculta la ventana.
         HideAfter(TimeSpan.FromMilliseconds(400));
     }
+
+    // el arrastre ya trae las rutas antes de soltar: de ahi sale el tipo
+    private void OnFilesDragged(string[] paths)
+    {
+        var kind = FileKinds.FromPaths(paths);
+
+        if (kind != _dragKind)
+        {
+            _convertWarned = false;
+        }
+
+        _dragKind = kind;
+        StopKindFallback();
+
+        Log.Info($"Arrastre de {paths.Length} elemento(s): {FileKinds.Label(kind)}");
+
+        if (_overlay is null || _busy)
+        {
+            return;
+        }
+
+        // si el submenu ya estaba abierto, se rehace con los formatos del tipo nuevo
+        if (_overlay is { InSubmenu: true, Submenu: SubmenuKind.Convert })
+        {
+            ShowConvertSubmenu();
+            return;
+        }
+
+        // Con imagen, video o audio lo util es elegir formato, asi que la rueda es directamente
+        // la de formatos: sin 'Comprimir', 'Mover a'... de por medio.
+        if (_overlay.InSubmenu)
+        {
+            return;
+        }
+
+        if (!CanConvert(kind))
+        {
+            _overlay.RestoreMainRing();   // carpetas y demas: la rueda de siempre
+            return;
+        }
+
+        ShowConvertSubmenu();
+    }
+
+    private static bool CanConvert(FileKind kind)
+        => kind is FileKind.Image or FileKind.Video or FileKind.Audio;
 
     private void OnFilesDropped(DropRequest drop)
     {
@@ -326,7 +412,9 @@ public partial class App : Application
 
     private void BeginConvert(string[] paths, string format)
     {
-        var label = _overlay?.LabelFor(ConvertSector) ?? "Convertir";
+        // Ojo: no vale 'LabelFor(ConvertSector)', porque en el anillo de formatos el sector 1
+        // es un formato (JPG) y no la accion.
+        const string label = "Convertir";
         var target = format.ToUpperInvariant();
         var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
 
@@ -336,8 +424,9 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Abre el submenu de 'Mover a' o el de 'Convertir' cuando el cursor se queda quieto en ese sector,
-    /// y lo cierra si vuelve al centro. Siempre con retardo: pasar de largo no cuenta.
+    /// Abre el submenu de 'Mover a' o el de 'Convertir' cuando el cursor se queda quieto en ese sector.
+    /// El de 'Mover a' se cierra si el cursor vuelve al centro; el de formatos no, porque es el anillo
+    /// del arrastre hasta que se suelta. Siempre con retardo: pasar de largo no cuenta.
     /// </summary>
     private void UpdateSubmenu()
     {
@@ -350,18 +439,30 @@ public partial class App : Application
 
         if (_overlay.InSubmenu)
         {
-            if (hover < 0 && _submenuTimer is null)
+            // El anillo de formatos es el anillo de este arrastre: se mantiene hasta soltar,
+            // sin volver a 'Comprimir', 'Mover a'... por pasar por el centro.
+            if (_overlay.Submenu == SubmenuKind.Convert)
             {
-                DeferSubmenu(() =>
+                return;
+            }
+
+            if (hover >= 0)
+            {
+                StopSubmenuTimer();
+                return;
+            }
+
+            // Quieto en el centro un buen rato: de vuelta al anillo principal.
+            DeferSubmenu(
+                () =>
                 {
                     if (_overlay is { InSubmenu: true } && _overlay.HoverSector < 0 && !_busy)
                     {
                         _overlay.RestoreMainRing();
                         Log.Info("Submenu cerrado.");
                     }
-                });
-            }
-
+                },
+                CenterDwell);
             return;
         }
 
@@ -425,27 +526,47 @@ public partial class App : Application
             return;
         }
 
-        var labels = new string[ConvertAction.Formats.Length];
+        var formats = ConvertAction.FormatsFor(_dragKind);
+
+        if (formats.Length == 0)
+        {
+            if (!_convertWarned)
+            {
+                _convertWarned = true;
+                Log.Info($"Submenu 'Convertir' sin formatos para {FileKinds.Label(_dragKind)}.");
+                _overlay.ShowStatus($"Convertir{Environment.NewLine}nada que convertir");
+            }
+
+            return;
+        }
+
+        var labels = new string[formats.Length];
 
         for (var index = 0; index < labels.Length; index++)
         {
-            labels[index] = ConvertAction.Formats[index].ToUpperInvariant();
+            labels[index] = formats[index].ToUpperInvariant();
         }
 
-        _overlay.ShowDestinations(labels, ConvertAction.Formats, SubmenuKind.Convert);
-        Log.Info($"Submenu 'Convertir': {string.Join(", ", labels)}");
+        _overlay.ShowDestinations(labels, formats, SubmenuKind.Convert);
+        Log.Info($"Submenu 'Convertir' ({FileKinds.Label(_dragKind)}): {string.Join(", ", labels)}");
     }
 
-    private void DeferSubmenu(Action action)
+    private void DeferSubmenu(Action action, TimeSpan? delay = null)
     {
-        _submenuTimer = new DispatcherTimer { Interval = SubmenuDelay };
+        StopSubmenuTimer();
+        _submenuTimer = new DispatcherTimer { Interval = delay ?? SubmenuDelay };
         _submenuTimer.Tick += (_, _) =>
         {
-            _submenuTimer?.Stop();
-            _submenuTimer = null;
+            StopSubmenuTimer();
             action();
         };
         _submenuTimer.Start();
+    }
+
+    private void StopSubmenuTimer()
+    {
+        _submenuTimer?.Stop();
+        _submenuTimer = null;
     }
 
     private static List<Destination> BuildDestinations()
