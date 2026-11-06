@@ -6,18 +6,6 @@ namespace Filewheel.App;
 
 public partial class MainWindow : Window
 {
-    private static readonly string[] MainLabels =
-{
-        "Comprimir",
-        "Convertir",
-        "Copiar ruta",
-        "Renombrar",
-        "Mover a",
-        "Duplicar",
-        "Eliminar",
-        "Ajustes",
-    };
-
     private double _scale = 1.0;
     private double _left;
     private double _top;
@@ -28,7 +16,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        Wheel.Labels = MainLabels;
+        Wheel.Labels = Array.Empty<string>();
     }
 
     public void ShowAt(int screenX, int screenY)
@@ -95,6 +83,12 @@ public partial class MainWindow : Window
     public void ShowPendingRing()
     {
         _draggedPaths = null;
+        ClearRing();
+    }
+
+    /// <summary>Quita cualquier anillo cuando el tipo de archivo no tiene formatos disponibles.</summary>
+    public void ClearRing()
+    {
         _destinations = null;
         _destinationFolders = null;
         Submenu = SubmenuKind.None;
@@ -103,12 +97,11 @@ public partial class MainWindow : Window
         Wheel.CenterText = string.Empty;
     }
 
-    /// <summary>Hay algun anillo puesto (si no, la rueda esta esperando saber que arrastras).</summary>
-    public bool HasRing => Wheel.Labels.Count > 0;
-
     public void RestoreMainRing()
     {
-        if (_destinations is null)
+        // Para imagen/video/audio, el anillo de formatos es el principal durante todo el arrastre.
+        // No lo sustituyas por Comprimir/Ajustes al procesar una suelta o cerrar la rueda.
+        if (Submenu == SubmenuKind.Convert)
         {
             return;
         }
@@ -116,7 +109,7 @@ public partial class MainWindow : Window
         _destinations = null;
         _destinationFolders = null;
         Submenu = SubmenuKind.None;
-        Wheel.Labels = MainLabels;
+        Wheel.Labels = Array.Empty<string>();
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
     }

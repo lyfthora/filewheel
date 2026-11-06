@@ -35,7 +35,6 @@ public partial class App : Application
     private DateTime _lastActivity = DateTime.UtcNow;
     private bool _busy;
     private DispatcherTimer? _submenuTimer;
-    private DispatcherTimer? _kindTimer;        // anillo principal si el arrastre no trae archivos
     private static readonly List<Destination> Destinations = BuildDestinations();
 
     protected override void OnStartup(StartupEventArgs e)
@@ -109,33 +108,6 @@ public partial class App : Application
         _overlay?.ForgetDraggedPaths();   // aunque se arrastre el mismo archivo que antes
         _overlay?.ShowPendingRing();   // sin anillo: aun no sabemos que arrastras
         _overlay?.ShowAt(x, y);
-        StartKindFallback();
-    }
-
-    // Los datos del arrastre llegan unos milisegundos despues de que aparezca la rueda. Si el
-    // arrastre no trae archivos, o tarda, a los 250 ms ponemos el anillo principal.
-    private void StartKindFallback()
-    {
-        StopKindFallback();
-        _kindTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(250) };
-        _kindTimer.Tick += (_, _) =>
-        {
-            StopKindFallback();
-
-            if (_overlay is not { IsVisible: true } || _overlay.HasRing || _dragKind != FileKind.None)
-            {
-                return;
-            }
-
-            _overlay.RestoreMainRing();
-        };
-        _kindTimer.Start();
-    }
-
-    private void StopKindFallback()
-    {
-        _kindTimer?.Stop();
-        _kindTimer = null;
     }
 
     private void OnMoved(int x, int y)
@@ -164,7 +136,6 @@ public partial class App : Application
         }
 
         _dragKind = kind;
-        StopKindFallback();
 
         Log.Info($"Arrastre de {paths.Length} elemento(s): {FileKinds.Label(kind)}");
 
@@ -189,7 +160,7 @@ public partial class App : Application
 
         if (!CanConvert(kind))
         {
-            _overlay.RestoreMainRing();   // carpetas y demas: la rueda de siempre
+            _overlay.ClearRing();
             return;
         }
 
@@ -221,7 +192,6 @@ public partial class App : Application
         }
         // Hay que leerlo antes de restaurar: al volver a la rueda principal se olvida.
         var submenu = _overlay.Submenu;
-        _overlay.RestoreMainRing();
 
         if (drop.Destination is not null)
         {
@@ -236,6 +206,8 @@ public partial class App : Application
 
             return;
         }
+
+        _overlay.RestoreMainRing();
 
         if (sector < 0)
         {
