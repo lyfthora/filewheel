@@ -6,6 +6,7 @@ namespace Filewheel.App;
 internal sealed class DragMonitor : IDisposable
 {
     private const int VkShift = 0x10;
+    private const int VkControl = 0x11;
     private const int DragThresholdPixels = 6;
     private readonly NativeMethods.LowLevelMouseProc _callback;
     private IntPtr _hook;
@@ -13,16 +14,18 @@ internal sealed class DragMonitor : IDisposable
     private bool _dragging;
     private int _originX;
     private int _originY;
-    private bool _shiftArmed;
+    private bool _armed;
+    private DragModifier _modifier;
 
     internal DragMonitor()
     {
         _callback = OnMouseEvent;
     }
     /// <summary>
-    /// shift + left click and mouse move enought
+    /// shift o ctrl + left click y movimiento suficiente. El modificador dice cual de las
+    /// dos ruedas toca: Shift (formatos/submenus) o Control (la general).
     /// </summary>
-    internal event Action<int, int>? DragStarted;
+    internal event Action<int, int, DragModifier>? DragStarted;
     /// <summary>
     /// cursor moved while the left mouse button was held down
     /// </summary>
@@ -89,7 +92,8 @@ internal sealed class DragMonitor : IDisposable
         }
         _buttonDown = true;
         _dragging = false;
-        _shiftArmed = false;
+        _armed = false;
+        _modifier = DragModifier.None;
         _originX = point.X;
         _originY = point.Y;
     }
@@ -109,22 +113,28 @@ internal sealed class DragMonitor : IDisposable
             }
             _dragging = true;
         }
-        var shiftDown = IsShiftDown();
-        if (!_shiftArmed)
+
+        var modifier = CurrentModifier();
+
+        if (!_armed)
         {
-            if (!shiftDown)
+            if (modifier == DragModifier.None)
             {
                 return;
             }
-            _shiftArmed = true;
-            DragStarted?.Invoke(point.X, point.Y);
+            _armed = true;
+            _modifier = modifier;
+            DragStarted?.Invoke(point.X, point.Y, modifier);
             return;
         }
-        if (!shiftDown)
+
+        if (modifier != _modifier)
         {
+            // Cambiar de tecla a mitad del arrastre (o soltarla) cancela: la rueda ya no vale.
             Cancel();
             return;
         }
+
         Moved?.Invoke(point.X, point.Y);
     }
     private void HandleButtonUp(NativeMethods.Point point)
@@ -133,15 +143,16 @@ internal sealed class DragMonitor : IDisposable
         {
             return;
         }
-        var wasArmed = _shiftArmed;
+        var wasArmed = _armed;
         _buttonDown = false;
         _dragging = false;
-        _shiftArmed = false;
+        _armed = false;
+        _modifier = DragModifier.None;
         if (!wasArmed)
         {
             return;
         }
-        if (IsShiftDown())
+        if (CurrentModifier() != DragModifier.None)
         {
             Dropped?.Invoke(point.X, point.Y);
         }
@@ -154,9 +165,30 @@ internal sealed class DragMonitor : IDisposable
     {
         _buttonDown = false;
         _dragging = false;
-        _shiftArmed = false;
+        _armed = false;
+        _modifier = DragModifier.None;
         Cancelled?.Invoke();
     }
-    private static bool IsShiftDown()
-       => (NativeMethods.GetAsyncKeyState(VkShift) & 0x8000) != 0;
+
+    /// <summary>Shift manda: si estan las dos pulsadas, el arrastre es el de formatos.</summary>
+    private static DragModifier CurrentModifier()
+    {
+        if (IsDown(VkShift))
+        {
+            return DragModifier.Shift;
+        }
+
+        return IsDown(VkControl) ? DragModifier.Control : DragModifier.None;
+    }
+
+    private static bool IsDown(int virtualKey)
+       => (NativeMethods.GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+}
+
+/// <summary>Con que tecla se armo el arrastre: Shift (formatos) o Control (rueda general).</summary>
+internal enum DragModifier
+{
+    None,
+    Shift,
+    Control,
 }
