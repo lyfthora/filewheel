@@ -22,6 +22,7 @@ public sealed class WheelView : FrameworkElement
     private IReadOnlyList<string> _labels = Array.Empty<string>();
     private int _hoverIndex = -1;
     private string _centerText = string.Empty;
+    private double _startAngle;
 
     public IReadOnlyList<string> Labels
     {
@@ -55,6 +56,32 @@ public sealed class WheelView : FrameworkElement
             InvalidateVisual();
         }
     }
+
+    /// <summary>
+    /// Grados que se gira todo el anillo (horario, desde arriba). Con dos sectores sirve
+    /// para dejarlos a izquierda y derecha en vez de arriba y abajo.
+    /// </summary>
+    public double StartAngle
+    {
+        get => _startAngle;
+        set
+        {
+            var normalized = value % 360.0;
+
+            if (normalized < 0)
+            {
+                normalized += 360.0;
+            }
+
+            if (Math.Abs(normalized - _startAngle) < 0.01)
+            {
+                return;
+            }
+
+            _startAngle = normalized;
+            InvalidateVisual();
+        }
+    }
     public int HitTestSector(Point position)
     {
         var count = _labels.Count;
@@ -76,6 +103,8 @@ public sealed class WheelView : FrameworkElement
         {
             angle += 360.0;
         }
+        // El mismo giro que usa OnRender, o el hover no coincidiria con lo pintado.
+        angle = (angle - _startAngle + 360.0) % 360.0;
         var sweep = 360.0 / count;
         var index = (int)((angle + (sweep / 2)) % 360.0 / sweep);
         return index >= count ? count - 1 : index;
@@ -95,8 +124,8 @@ public sealed class WheelView : FrameworkElement
 
         for (var index = 0; index < count; index++)
         {
-            var start = (index * sweep) - (sweep / 2) + (GapDegrees / 2);
-            var end = (index * sweep) + (sweep / 2) - (GapDegrees / 2);
+            var start = (index * sweep) - (sweep / 2) + (GapDegrees / 2) + _startAngle;
+            var end = (index * sweep) + (sweep / 2) - (GapDegrees / 2) + _startAngle;
 
             var geometry = CreateSector(center, radius, innerRadius, start, end);
             var isHovered = index == _hoverIndex;
