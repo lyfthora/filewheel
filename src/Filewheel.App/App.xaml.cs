@@ -30,6 +30,8 @@ public partial class App : Application
     private FileKind _dragKind = FileKind.None;   // tipo de lo que se arrastra ahora
     private bool _convertWarned;                  // ya avisamos de que este tipo no se convierte
     private DragMonitor? _monitor;
+    private KeyboardMonitor? _keyboard;
+    private bool _generalRingOpen;   // rueda abierta con Shift + Space, no con un arrastre
     private DispatcherTimer? _watchdog;
     private DispatcherTimer? _hideTimer;
     private DateTime _lastActivity = DateTime.UtcNow;
@@ -66,6 +68,7 @@ public partial class App : Application
         _monitor.Moved += OnMoved;
         _monitor.Dropped += OnMouseReleased;
         _monitor.Cancelled += OnCancelled;
+        _monitor.PointerMoved += OnPointerMoved;
         try
         {
             _monitor.Start();
@@ -81,6 +84,21 @@ public partial class App : Application
                 MessageBoxImage.Error);
             Shutdown();
             return;
+        }
+
+        // El teclado es opcional: sin este hook se pierde Shift + Space, pero arrastrar sigue vivo.
+        _keyboard = new KeyboardMonitor();
+        _keyboard.GeneralRequested += OnGeneralRequested;
+        _keyboard.DismissRequested += OnGeneralDismissed;
+        try
+        {
+            _keyboard.Start();
+            Log.Info("Hook del teclado instalado.");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("No se pudo instalar el hook del teclado: Shift + Space no funcionara.", ex);
+            _keyboard = null;
         }
 
         _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
@@ -103,6 +121,7 @@ public partial class App : Application
     private void OnDragStarted(int x, int y)
     {
         _lastActivity = DateTime.UtcNow;
+        _generalRingOpen = false;   // un arrastre sustituye a la rueda general
         _dragKind = FileKind.None;   // arrastre nuevo: todavia no sabemos que es
         _convertWarned = false;
         _overlay?.ForgetDraggedPaths();   // aunque se arrastre el mismo archivo que antes
@@ -708,6 +727,7 @@ public partial class App : Application
         _hideTimer.Tick += (_, _) =>
         {
             _hideTimer?.Stop();
+            _generalRingOpen = false;
             _overlay?.HideWheel();
         };
         _hideTimer.Start();
@@ -730,10 +750,64 @@ public partial class App : Application
         return TimeSpan.FromMilliseconds(ms);
     }
 
+    /// <summary>
+    /// Shift + Space sin arrastrar: la rueda general, centrada en el cursor.
+    /// Si ya hay algo en pantalla (un arrastre en curso, un aviso) no la pisamos.
+    /// </summary>
+    private void OnGeneralRequested()
+    {
+        _lastActivity = DateTime.UtcNow;
+
+        if (_overlay is null || _busy || _overlay.IsVisible)
+        {
+            return;
+        }
+
+        _hideTimer?.Stop();
+        NativeMethods.GetCursorPos(out var cursor);
+
+        _generalRingOpen = true;
+        _overlay.ShowMainRing();
+        _overlay.ShowAt(cursor.X, cursor.Y);
+        _overlay.UpdateHover(cursor.X, cursor.Y);
+
+        Log.Info("Rueda general abierta (Shift + Space).");
+    }
+
+    private void OnGeneralDismissed()
+    {
+        if (!_generalRingOpen)
+        {
+            return;
+        }
+
+        _generalRingOpen = false;
+        _lastActivity = DateTime.UtcNow;
+        _hideTimer?.Stop();
+        _overlay?.HideWheel();
+        Log.Info("Rueda general cerrada.");
+    }
+
+    /// <summary>
+    /// El hook del raton solo avisaba de movimientos con el boton pulsado (arrastre).
+    /// La rueda general necesita el hover sin arrastrar nada.
+    /// </summary>
+    private void OnPointerMoved(int x, int y)
+    {
+        if (!_generalRingOpen)
+        {
+            return;
+        }
+
+        _lastActivity = DateTime.UtcNow;
+        _overlay?.UpdateHover(x, y);
+    }
+
     private void OnCancelled()
     {
         Log.Info("Arrastre cancelado.");
         _lastActivity = DateTime.UtcNow;
+        _generalRingOpen = false;
         _overlay?.HideWheel();
     }
 
@@ -744,6 +818,7 @@ public partial class App : Application
         _watchdog?.Stop();
         _hideTimer?.Stop();
         _monitor?.Dispose();
+        _keyboard?.Dispose();
         base.OnExit(e);
     }
 }
