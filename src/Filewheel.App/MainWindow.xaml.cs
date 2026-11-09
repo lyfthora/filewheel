@@ -6,6 +6,18 @@ namespace Filewheel.App;
 
 public partial class MainWindow : Window
 {
+    private static readonly string[] MainLabels =
+    {
+        "Comprimir",     // 0
+        "Convertir",     // 1
+        "Copiar ruta",   // 2
+        "Renombrar",     // 3
+        "Mover a",       // 4
+        "Duplicar",      // 5
+        "Eliminar",      // 6
+        "Ajustes",       // 7
+    };
+
     private double _scale = 1.0;
     private double _left;
     private double _top;
@@ -16,7 +28,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        Wheel.Labels = Array.Empty<string>();
+        Wheel.Labels = MainLabels;
     }
 
     public void ShowAt(int screenX, int screenY)
@@ -112,6 +124,22 @@ public partial class MainWindow : Window
         Wheel.Labels = Array.Empty<string>();
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
+    }
+
+    /// <summary>
+    /// Rueda general sin arrastre de por medio (Shift + Space): los sectores de siempre
+    /// y ningun submenu abierto. No la confundas con ShowPendingRing, que la deja vacia
+    /// a proposito mientras no se sabe que se arrastra.
+    /// </summary>
+    public void ShowMainRing()
+    {
+        _draggedPaths = null;
+        _destinations = null;
+        _destinationFolders = null;
+        Submenu = SubmenuKind.None;
+        Wheel.Labels = MainLabels;
+        Wheel.HoverIndex = -1;
+        Wheel.CenterText = "Elige una accion";
     }
 
     public bool InMoveMode => Submenu == SubmenuKind.Move;
