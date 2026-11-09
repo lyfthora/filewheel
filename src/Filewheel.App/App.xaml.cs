@@ -11,6 +11,7 @@ namespace Filewheel.App;
 public partial class App : Application
 {
     private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(2);
+    // Los indices siguen el orden de ActionLabels en MainWindow.
     private const int CopyPathSector = 2;
     private const int DuplicateSector = 5;
     private const int MaxNameChars = 16;
@@ -28,6 +29,7 @@ public partial class App : Application
 
     private MainWindow? _overlay;
     private FileKind _dragKind = FileKind.None;   // tipo de lo que se arrastra ahora
+    private DragModifier _dragModifier;            // con que tecla se armo este arrastre
     private bool _convertWarned;                  // ya avisamos de que este tipo no se convierte
     private DragMonitor? _monitor;
     private KeyboardMonitor? _keyboard;
@@ -118,14 +120,25 @@ public partial class App : Application
         _watchdog.Start();
     }
 
-    private void OnDragStarted(int x, int y)
+    private void OnDragStarted(int x, int y, DragModifier modifier)
     {
         _lastActivity = DateTime.UtcNow;
         _generalRingOpen = false;   // un arrastre sustituye a la rueda general
+        _dragModifier = modifier;
         _dragKind = FileKind.None;   // arrastre nuevo: todavia no sabemos que es
         _convertWarned = false;
         _overlay?.ForgetDraggedPaths();   // aunque se arrastre el mismo archivo que antes
-        _overlay?.ShowPendingRing();   // sin anillo: aun no sabemos que arrastras
+
+        if (modifier == DragModifier.Control)
+        {
+            // Ctrl + arrastrar: la rueda general de siempre, sin 'Ajustes' y ya con sectores.
+            _overlay?.ShowDragRing();
+        }
+        else
+        {
+            _overlay?.ShowPendingRing();   // sin anillo: aun no sabemos que arrastras
+        }
+
         _overlay?.ShowAt(x, y);
     }
 
@@ -157,6 +170,18 @@ public partial class App : Application
         _dragKind = kind;
 
         Log.Info($"Arrastre de {paths.Length} elemento(s): {FileKinds.Label(kind)}");
+
+        // Con Ctrl la rueda de acciones se queda: no la cambiamos por la de formatos.
+        if (_dragModifier == DragModifier.Control)
+        {
+            return;
+        }
+
+        // El menu de Shift + Space no se sustituye por la rueda de formatos.
+        if (_generalRingOpen)
+        {
+            return;
+        }
 
         if (_overlay is null || _busy)
         {
@@ -211,6 +236,17 @@ public partial class App : Application
         }
         // Hay que leerlo antes de restaurar: al volver a la rueda principal se olvida.
         var submenu = _overlay.Submenu;
+        // La etiqueta tambien se lee ahora: RestoreMainRing deja Wheel.Labels vacio.
+        var label = _overlay.LabelFor(sector);
+
+        // La rueda de Shift + Space es el menu (Ajustes/Terminal): no actua sobre archivos.
+        if (_generalRingOpen)
+        {
+            Log.Info("Drop ignorado: la rueda abierta es la de Ajustes/Terminal.");
+            _overlay.ShowStatus("Sin accion");
+            HideAfter(TimeSpan.FromMilliseconds(900));
+            return;
+        }
 
         if (drop.Destination is not null)
         {
@@ -236,7 +272,6 @@ public partial class App : Application
             return;
         }
 
-        var label = _overlay.LabelFor(sector);
         var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
         Log.Info($"Drop en '{label}' (sector {sector}): {string.Join(" | ", paths)}");
         _overlay.ShowStatus($"{count}{Environment.NewLine}{label}");
@@ -365,7 +400,12 @@ public partial class App : Application
             ? Path.GetFileName(paths[0])
             : $"{paths.Length} elementos";
 
-        var label = _overlay?.LabelFor(DeleteSector) ?? "Eliminar";
+        var label = _overlay?.LabelFor(DeleteSector);
+
+        if (string.IsNullOrEmpty(label))
+        {
+            label = "Eliminar";
+        }
         var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
         var prompt = new DeletePrompt(subject);
 
@@ -391,7 +431,12 @@ public partial class App : Application
     }
     private void BeginMove(string[] paths, string destination)
     {
-        var label = _overlay?.LabelFor(MoveSector) ?? "Mover a";
+        var label = _overlay?.LabelFor(MoveSector);
+
+        if (string.IsNullOrEmpty(label))
+        {
+            label = "Mover a";
+        }
         var folder = Path.GetFileName(Path.TrimEndingDirectorySeparator(destination));
         var target = folder.Length > 0 ? folder : destination;
         var count = paths.Length == 1 ? "1 archivo" : $"{paths.Length} archivos";
@@ -767,7 +812,7 @@ public partial class App : Application
         NativeMethods.GetCursorPos(out var cursor);
 
         _generalRingOpen = true;
-        _overlay.ShowMainRing();
+        _overlay.ShowMenuRing();
         _overlay.ShowAt(cursor.X, cursor.Y);
         _overlay.UpdateHover(cursor.X, cursor.Y);
 
