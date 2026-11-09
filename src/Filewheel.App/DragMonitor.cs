@@ -35,6 +35,8 @@ internal sealed class DragMonitor : IDisposable
     /// the drag ended without a selection (Shift was released before the mouse button)
     /// </summary>
     internal event Action? Cancelled;
+    /// <summary>El cursor se movio, con boton pulsado o sin el: la rueda general tambien lo necesita.</summary>
+    internal event Action<int, int>? PointerMoved;
     internal void Start()
     {
         if (_hook != IntPtr.Zero)
@@ -69,6 +71,7 @@ internal sealed class DragMonitor : IDisposable
                     HandleButtonDown(data.Point);
                     break;
                 case NativeMethods.WmMouseMove:
+                    PointerMoved?.Invoke(data.Point.X, data.Point.Y);
                     HandleMove(data.Point);
                     break;
                 case NativeMethods.WmLButtonUp:
