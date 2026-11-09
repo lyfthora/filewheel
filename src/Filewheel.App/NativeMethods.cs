@@ -18,6 +18,18 @@ internal static class NativeMethods
     internal const int WmLButtonUp = 0x0202;
     internal const int WmMouseMove = 0x0200;
 
+    // Teclado: Shift + Space sin arrastrar abre la rueda general.
+    internal const int WhKeyboardLl = 13;
+    internal const int WmKeyDown = 0x0100;
+    internal const int WmKeyUp = 0x0101;
+    internal const int WmSysKeyDown = 0x0104;
+    internal const int WmSysKeyUp = 0x0105;
+    internal const int VkShift = 0x10;
+    internal const int VkLShift = 0xA0;
+    internal const int VkRShift = 0xA1;
+    internal const int VkSpace = 0x20;
+    internal const int VkEscape = 0x1B;
+
     internal static readonly IntPtr HwndTopmost = new(-1);
 
     [StructLayout(LayoutKind.Sequential)]
@@ -36,7 +48,19 @@ internal static class NativeMethods
         public int Time;
         public IntPtr ExtraInfo;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct KeyboardHookData
+    {
+        public int VirtualKey;
+        public int ScanCode;
+        public int Flags;
+        public int Time;
+        public IntPtr ExtraInfo;
+    }
     internal delegate IntPtr LowLevelMouseProc(int code, IntPtr wParam, IntPtr lParam);
+
+    internal delegate IntPtr LowLevelKeyboardProc(int code, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetCursorPos(out Point point);
@@ -125,6 +149,14 @@ internal static class NativeMethods
     internal static extern IntPtr SetWindowsHookEx(
     int hookId,
     LowLevelMouseProc callback,
+    IntPtr module,
+    uint threadId);
+
+    // Mismo SetWindowsHookExW, pero con la firma del callback de teclado.
+    [DllImport("user32.dll", EntryPoint = "SetWindowsHookExW")]
+    internal static extern IntPtr SetWindowsHookExKeyboard(
+    int hookId,
+    LowLevelKeyboardProc callback,
     IntPtr module,
     uint threadId);
     [DllImport("user32.dll")]
