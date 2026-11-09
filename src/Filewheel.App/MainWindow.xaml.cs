@@ -6,7 +6,8 @@ namespace Filewheel.App;
 
 public partial class MainWindow : Window
 {
-    private static readonly string[] MainLabels =
+    // Rueda de acciones: la que sale al arrastrar con Ctrl. Sin huecos ni 'Ajustes'.
+    private static readonly string[] ActionLabels =
     {
         "Comprimir",     // 0
         "Convertir",     // 1
@@ -15,8 +16,18 @@ public partial class MainWindow : Window
         "Mover a",       // 4
         "Duplicar",      // 5
         "Eliminar",      // 6
-        "Ajustes",       // 7
     };
+
+    // Rueda de Shift + Space: solo el menu de la app, uno a cada lado.
+    private static readonly string[] MenuLabels =
+    {
+        "Ajustes",    // izquierda
+        "Terminal",   // derecha
+    };
+
+    // Con dos sectores, girar el anillo 270 grados los deja a izquierda y derecha
+    // en vez de arriba y abajo.
+    private const double MenuStartAngle = 270.0;
 
     private double _scale = 1.0;
     private double _left;
@@ -28,7 +39,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
-        Wheel.Labels = MainLabels;
+        Wheel.Labels = ActionLabels;
     }
 
     public void ShowAt(int screenX, int screenY)
@@ -83,6 +94,7 @@ public partial class MainWindow : Window
         _destinations = labels;
         _destinationFolders = values;
         Submenu = kind;
+        Wheel.StartAngle = 0;
         Wheel.Labels = labels;
         Wheel.HoverIndex = -1;
         Wheel.CenterText = kind == SubmenuKind.Convert ? "Suelta en el formato" : "Suelta en el destino";
@@ -104,6 +116,7 @@ public partial class MainWindow : Window
         _destinations = null;
         _destinationFolders = null;
         Submenu = SubmenuKind.None;
+        Wheel.StartAngle = 0;
         Wheel.Labels = Array.Empty<string>();
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
@@ -121,25 +134,35 @@ public partial class MainWindow : Window
         _destinations = null;
         _destinationFolders = null;
         Submenu = SubmenuKind.None;
+        Wheel.StartAngle = 0;
         Wheel.Labels = Array.Empty<string>();
         Wheel.HoverIndex = -1;
         Wheel.CenterText = string.Empty;
     }
 
     /// <summary>
-    /// Rueda general sin arrastre de por medio (Shift + Space): los sectores de siempre
-    /// y ningun submenu abierto. No la confundas con ShowPendingRing, que la deja vacia
-    /// a proposito mientras no se sabe que se arrastra.
+    /// Shift + Space: la rueda de menu, solo Ajustes y Terminal, uno a cada lado.
+    /// No la confundas con ShowPendingRing, que la deja vacia a proposito mientras
+    /// no se sabe que se arrastra.
     /// </summary>
-    public void ShowMainRing()
+    public void ShowMenuRing() => ShowGeneralRing(MenuLabels, "Elige una opcion", MenuStartAngle);
+
+    /// <summary>
+    /// Ctrl + arrastrar: todas las acciones, sin 'Ajustes'. Los sectores se reparten
+    /// el anillo entero, asi que no hay huecos y el tamano de la ventana no cambia.
+    /// </summary>
+    public void ShowDragRing() => ShowGeneralRing(ActionLabels, "Suelta en un sector", 0);
+
+    private void ShowGeneralRing(IReadOnlyList<string> labels, string centerText, double startAngle)
     {
         _draggedPaths = null;
         _destinations = null;
         _destinationFolders = null;
         Submenu = SubmenuKind.None;
-        Wheel.Labels = MainLabels;
+        Wheel.StartAngle = startAngle;
+        Wheel.Labels = labels;
         Wheel.HoverIndex = -1;
-        Wheel.CenterText = "Elige una accion";
+        Wheel.CenterText = centerText;
     }
 
     public bool InMoveMode => Submenu == SubmenuKind.Move;
