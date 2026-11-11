@@ -10,7 +10,6 @@ namespace Filewheel.App;
 
 public partial class App : Application
 {
-    private static readonly TimeSpan IdleTimeout = TimeSpan.FromMinutes(2);
     // Los indices siguen el orden de ActionLabels en MainWindow.
     private const int CopyPathSector = 2;
     private const int DuplicateSector = 5;
@@ -34,12 +33,11 @@ public partial class App : Application
     private DragMonitor? _monitor;
     private KeyboardMonitor? _keyboard;
     private bool _generalRingOpen;   // rueda abierta con Shift + Space, no con un arrastre
-    private DispatcherTimer? _watchdog;
     private DispatcherTimer? _hideTimer;
-    private DateTime _lastActivity = DateTime.UtcNow;
     private bool _busy;
     private DispatcherTimer? _submenuTimer;
     private static readonly List<Destination> Destinations = BuildDestinations();
+    private TrayIcon? _tray;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -65,6 +63,10 @@ public partial class App : Application
         _overlay.FilesDropped += OnFilesDropped;
         _overlay.FilesDragged += OnFilesDragged;
 
+        _tray = new TrayIcon();
+        _tray.OpenRequested += OnGeneralRequested;
+        // _tray.ToggleRequested += OnToggleTray;
+        _tray.QuitRequested += OnQuitRequested;
         _monitor = new DragMonitor();
         _monitor.DragStarted += OnDragStarted;
         _monitor.Moved += OnMoved;
@@ -103,26 +105,16 @@ public partial class App : Application
             _keyboard = null;
         }
 
-        _watchdog = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
-        _watchdog.Tick += (_, _) =>
-        {
-            if (_busy)
-            {
-                return;
-            }
+    }
 
-            if (DateTime.UtcNow - _lastActivity > IdleTimeout)
-            {
-                _watchdog?.Stop();
-                Shutdown();
-            }
-        };
-        _watchdog.Start();
+    private void OnQuitRequested()
+    {
+        Log.Info("Salida pedida desde la bandeja.");
+        Shutdown();
     }
 
     private void OnDragStarted(int x, int y, DragModifier modifier)
     {
-        _lastActivity = DateTime.UtcNow;
         _generalRingOpen = false;   // un arrastre sustituye a la rueda general
         _dragModifier = modifier;
         _dragKind = FileKind.None;   // arrastre nuevo: todavia no sabemos que es
@@ -144,14 +136,12 @@ public partial class App : Application
 
     private void OnMoved(int x, int y)
     {
-        _lastActivity = DateTime.UtcNow;
         _overlay?.UpdateHover(x, y);
         UpdateSubmenu();
     }
 
     private void OnMouseReleased(int x, int y)
     {
-        _lastActivity = DateTime.UtcNow;
         // El drop real (OLE) llega justo despues del boton. Si no llega -porque se solto
         // fuera de la rueda- este plazo oculta la ventana.
         HideAfter(TimeSpan.FromMilliseconds(400));
@@ -216,7 +206,6 @@ public partial class App : Application
 
     private void OnFilesDropped(DropRequest drop)
     {
-        _lastActivity = DateTime.UtcNow;
         _hideTimer?.Stop();
         _submenuTimer?.Stop();
         _submenuTimer = null;
@@ -314,8 +303,7 @@ public partial class App : Application
         finally
         {
             _busy = false;
-            _lastActivity = DateTime.UtcNow;
-            HideAfter(LingerFor(result));
+                HideAfter(LingerFor(result));
         }
     }
     private void BeginRename(string[] paths)
@@ -352,12 +340,10 @@ public partial class App : Application
         var prompt = new RenamePrompt(name, stem, typed => CommitRename(path, typed));
 
         _busy = true;
-        _lastActivity = DateTime.UtcNow;
         prompt.Closed += (_, _) =>
         {
             _busy = false;
-            _lastActivity = DateTime.UtcNow;
-            _overlay?.HideWheel();
+                _overlay?.HideWheel();
         };
 
         prompt.ShowNear(cursor.X, cursor.Y);
@@ -410,12 +396,9 @@ public partial class App : Application
         var prompt = new DeletePrompt(subject);
 
         _busy = true;
-        _lastActivity = DateTime.UtcNow;
 
         prompt.Closed += (_, _) =>
         {
-            _lastActivity = DateTime.UtcNow;
-
             if (!prompt.Confirmed)
             {
                 _busy = false;
@@ -801,7 +784,6 @@ public partial class App : Application
     /// </summary>
     private void OnGeneralRequested()
     {
-        _lastActivity = DateTime.UtcNow;
 
         if (_overlay is null || _busy || _overlay.IsVisible)
         {
@@ -827,7 +809,6 @@ public partial class App : Application
         }
 
         _generalRingOpen = false;
-        _lastActivity = DateTime.UtcNow;
         _hideTimer?.Stop();
         _overlay?.HideWheel();
         Log.Info("Rueda general cerrada.");
@@ -844,14 +825,12 @@ public partial class App : Application
             return;
         }
 
-        _lastActivity = DateTime.UtcNow;
         _overlay?.UpdateHover(x, y);
     }
 
     private void OnCancelled()
     {
         Log.Info("Arrastre cancelado.");
-        _lastActivity = DateTime.UtcNow;
         _generalRingOpen = false;
         _overlay?.HideWheel();
     }
@@ -860,10 +839,10 @@ public partial class App : Application
 
     {
         Log.Info("=== Filewheel cerrando ===");
-        _watchdog?.Stop();
         _hideTimer?.Stop();
         _monitor?.Dispose();
         _keyboard?.Dispose();
+        _tray?.Dispose();
         base.OnExit(e);
     }
 }
