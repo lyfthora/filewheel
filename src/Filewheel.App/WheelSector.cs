@@ -20,15 +20,66 @@ namespace Filewheel.App;
 public sealed class WheelSector : Border
 {
     private TextBlock? _label;
+    private double _offsetX;
+    private double _offsetY;
+
+    // CornerRadius es una propiedad heredada de Border: no se puede interceptar su setter,
+    // asi que se avisa del cambio por los metadatos de la propiedad.
+    static WheelSector()
+    {
+        CornerRadiusProperty.OverrideMetadata(
+            typeof(WheelSector),
+            new FrameworkPropertyMetadata(
+                new CornerRadius(0),
+                FrameworkPropertyMetadataOptions.AffectsArrange,
+                (d, _) => ((WheelSector)d).InvalidateShape()));
+    }
 
     /// <summary>Forma recortada de la cuna, en coordenadas locales del contenedor.</summary>
     internal Geometry? SectorShape { get; set; }
 
     /// <summary>Desplazamiento del contenedor respecto al centro de la cuna, en DIPs.</summary>
-    public double OffsetX { get; set; }
+    public double OffsetX
+    {
+        get => _offsetX;
+        set
+        {
+            if (_offsetX == value)
+            {
+                return;
+            }
+
+            _offsetX = value;
+            InvalidateShape();
+        }
+    }
 
     /// <summary>Desplazamiento del contenedor respecto al centro de la cuna, en DIPs.</summary>
-    public double OffsetY { get; set; }
+    public double OffsetY
+    {
+        get => _offsetY;
+        set
+        {
+            if (_offsetY == value)
+            {
+                return;
+            }
+
+            _offsetY = value;
+            InvalidateShape();
+        }
+    }
+
+    /// <summary>
+    /// La forma de la cuna se calcula en WheelView.ArrangeOverride, no aqui, y se guarda en
+    /// SectorShape. Cambiar tamano, posicion o redondeo no dispara ese calculo por si solo:
+    /// hay que pedirle un pase de layout a la rueda o la geometria guardada se queda igual.
+    /// </summary>
+    private void InvalidateShape()
+    {
+        InvalidateArrange();
+        (Parent as WheelView)?.InvalidateArrange();
+    }
 
     /// <summary>
     /// Texto por defecto del contenedor. Si quieres otra cosa dentro (un StackPanel, una
