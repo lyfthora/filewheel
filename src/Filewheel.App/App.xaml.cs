@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -38,12 +39,22 @@ public partial class App : Application
     private DispatcherTimer? _submenuTimer;
     private static readonly List<Destination> Destinations = BuildDestinations();
     private TrayIcon? _tray;
+    private const string InstanceName = @"Local\Filewheel.SingleInstance";
+    private Mutex? _instanceLock;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         Log.Start();
         Log.Info("=== Filewheel arrancando ===");
         Log.Info(Log.FilePath is null ? "Sin archivo de log." : $"Log: {Log.FilePath}");
+
+        // Una sola instancia: sin esto, dos copias instalan dos hooks y dos bandejas.
+        if (!TryTakeInstanceLock())
+        {
+            Log.Info("Ya hay otra instancia de Filewheel; esta se cierra.");
+            Shutdown();
+            return;
+        }
 
         //  cualquier fallo inesperado queda escrito en el log 
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
@@ -835,10 +846,26 @@ public partial class App : Application
         _overlay?.HideWheel();
     }
 
-    protected override void OnExit(ExitEventArgs e)
+    private bool TryTakeInstanceLock()
+    {
+        _instanceLock = new Mutex(initiallyOwned: true, InstanceName, out var createdNew);
 
+        if (createdNew)
+        {
+            return true;
+        }
+
+        // Otra instancia ya tiene el candado: esta no toca hooks ni bandeja.
+        _instanceLock.Dispose();
+        _instanceLock = null;
+        return false;
+    }
+
+    protected override void OnExit(ExitEventArgs e)
     {
         Log.Info("=== Filewheel cerrando ===");
+        _instanceLock?.ReleaseMutex();
+        _instanceLock?.Dispose();
         _hideTimer?.Stop();
         _monitor?.Dispose();
         _keyboard?.Dispose();
