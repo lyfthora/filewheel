@@ -44,9 +44,14 @@ public sealed class WheelView : Panel
     private double _startAngle;
     private Action<WheelSector, int>? _sectorSetup;
 
+    // Copia de los textos que estan pintados ahora mismo. Sin ella no hay forma de saber si
+    // un array mutado en sitio sigue diciendo lo mismo que la rueda.
+    private string[] _renderedLabels = Array.Empty<string>();
+
     /// <summary>
     /// Textos de las cunas. Al cambiar la lista se recrean los contenedores con sus valores
-    /// por defecto; si vuelves a pasar la misma instancia, se conserva lo que hayas configurado.
+    /// por defecto; si vuelves a pasar la misma instancia sin cambiar sus textos, se conserva
+    /// lo que hayas configurado. Si mutas el array en sitio, la rueda se entera igual.
     /// </summary>
     public IReadOnlyList<string> Labels
     {
@@ -55,12 +60,15 @@ public sealed class WheelView : Panel
         {
             var next = value ?? Array.Empty<string>();
 
-            if (ReferenceEquals(next, _labels))
+            // Misma instancia y mismo contenido: "no cambies nada". Cualquier otro caso,
+            // incluido haber mutado el array en sitio, reconstruye las cunas.
+            if (ReferenceEquals(next, _labels) && SameContent(next, _renderedLabels))
             {
                 return;
             }
 
             _labels = next;
+            _renderedLabels = Snapshot(next);
             RebuildSectors();
             InvalidateMeasure();
             InvalidateVisual();
@@ -80,6 +88,36 @@ public sealed class WheelView : Panel
             ApplySectorSetup();
             InvalidateMeasure();
         }
+    }
+
+    private static bool SameContent(IReadOnlyList<string> a, IReadOnlyList<string> b)
+    {
+        if (a.Count != b.Count)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < a.Count; index++)
+        {
+            if (!string.Equals(a[index], b[index], StringComparison.Ordinal))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string[] Snapshot(IReadOnlyList<string> source)
+    {
+        var copy = new string[source.Count];
+
+        for (var index = 0; index < copy.Length; index++)
+        {
+            copy[index] = source[index];
+        }
+
+        return copy;
     }
 
     /// <summary>El contenedor de una cuna, o null si el indice se sale.</summary>
